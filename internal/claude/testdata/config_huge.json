@@ -1,0 +1,30 @@
+{
+  "zLast": "keys deliberately not alphabetical",
+  "numStartups": 12345,
+  "bigInt": 9007199254740993,
+  "preciseFloat": 0.30000000000000004,
+  "sciNotation": 1.5e-7,
+  "negZero": -0.0,
+  "unicode": "héllo wörld 🎉 日本語",
+  "escapedUnicode": "café 😀",
+  "quotesAndSlashes": "he said \"hi\" c:\\temp\\x",
+  "nullValue": null,
+  "boolValue": true,
+  "emptyObject": {},
+  "emptyArray": [],
+  "oauthAccount": {
+    "accountUuid": "old-uuid-2222",
+    "emailAddress": "old2@example.com"
+  },
+  "nested": {
+    "zz": [1, 2, {"deep": {"deeper": [null, false, 1e100]}}],
+    "aa": "nested key order must survive",
+    "mixed": [0.1, "two", {"three": 3}]
+  },
+  "tipsHistory": {
+    "new-user-warmup": 1,
+    "shift-enter": 42
+  },
+  "firstStartTime": "2025-01-15T10:30:00.000Z",
+  "cachedChangelog": "# Changelog\n\n## 2.0.1\n\n- multiline\n- content"
+}

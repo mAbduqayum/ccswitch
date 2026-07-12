@@ -1,0 +1,24 @@
+{
+  "numStartups": 953,
+  "installMethod": "native",
+  "oauthAccount": {
+    "accountUuid": "old-uuid-1111",
+    "emailAddress": "old@example.com",
+    "organizationUuid": "org-1111",
+    "displayName": "Old User",
+    "billingType": "stripe_subscription",
+    "organizationRole": "admin",
+    "profileFetchedAt": 1752000000000
+  },
+  "projects": {
+    "/home/user/repo": {
+      "allowedTools": [],
+      "history": [
+        {
+          "display": "fix the bug",
+          "pastedContents": {}
+        }
+      ]
+    }
+  }
+}
