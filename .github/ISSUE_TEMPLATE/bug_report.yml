@@ -1,0 +1,45 @@
+name: Bug report
+description: Report a problem with ccswitch
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Run `ccswitch`
+        2. Press `enter` on account 2
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: ccswitch version
+      description: Output of `ccswitch --version`.
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: OS and terminal
+      placeholder: e.g. Arch Linux / kitty, macOS 15 / iTerm2, WSL2 Ubuntu
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Doctor output
+      description: >-
+        Paste the output of `ccswitch doctor` (it never contains token
+        values).
+      render: text
+    validations:
+      required: false

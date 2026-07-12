@@ -1,0 +1,14 @@
+/ccswitch
+/dist/
+/completions/
+*.test
+*.out
+
+# direnv + nix
+/.direnv/
+/.devenv/
+/.devenv.flake.nix
+/.envrc.local
+/result
+/result-*
+/.idea

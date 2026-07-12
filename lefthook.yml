@@ -1,0 +1,24 @@
+pre-commit:
+  parallel: true
+  commands:
+    fmt:
+      glob: "*.go"
+      run: gofumpt -l -w {staged_files} && git add {staged_files}
+    vet:
+      run: go vet ./...
+    lint:
+      run: golangci-lint run --new-from-rev=HEAD~1
+
+
+commit-msg:
+  commands:
+    conventional-commits:
+      run: |
+        CONVENTIONAL_COMMIT_PATTERN="^(new|feat|fix|docs|style|ref|perf|test|chore|build|ci|revert)(\(.+\))?:"
+        commit_message=$(cat {1})
+        if ! echo "$commit_message" | grep -qE "$CONVENTIONAL_COMMIT_PATTERN"; then
+          echo "Commit message must follow conventional commits format:"
+          echo "type(scope): description"
+          echo "Types: new, feat, fix, docs, style, ref, perf, test, chore, build, ci, revert"
+          exit 1
+        fi
