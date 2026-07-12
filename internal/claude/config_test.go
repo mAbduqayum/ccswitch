@@ -153,6 +153,24 @@ func TestPatchOAuthAccountErrors(t *testing.T) {
 			t.Fatal("want error")
 		}
 	})
+	t.Run("config containing JSON null must not panic", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), ".claude.json")
+		if err := os.WriteFile(path, []byte(`null`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := PatchOAuthAccount(path, newProfile); err == nil {
+			t.Error("want error for null config")
+		}
+	})
+	t.Run("nil and null profiles rejected", func(t *testing.T) {
+		path := copyFixture(t, "config_basic.json", 0o600)
+		if err := PatchOAuthAccount(path, nil); err == nil {
+			t.Error("want error for nil profile")
+		}
+		if err := PatchOAuthAccount(path, json.RawMessage(`null`)); err == nil {
+			t.Error("want error for null profile")
+		}
+	})
 	t.Run("malformed config", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), ".claude.json")
 		if err := os.WriteFile(path, []byte(`{"a":`), 0o600); err != nil {
@@ -173,6 +191,16 @@ func TestPatchOAuthAccountErrors(t *testing.T) {
 func TestReadOAuthAccount(t *testing.T) {
 	t.Run("missing file is not an error", func(t *testing.T) {
 		raw, p, err := ReadOAuthAccount(filepath.Join(t.TempDir(), "nope.json"))
+		if err != nil || raw != nil || p != (Profile{}) {
+			t.Errorf("got %s, %+v, %v; want nil, zero, nil", raw, p, err)
+		}
+	})
+	t.Run("null oauthAccount treated as absent", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), ".claude.json")
+		if err := os.WriteFile(path, []byte(`{"oauthAccount": null}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		raw, p, err := ReadOAuthAccount(path)
 		if err != nil || raw != nil || p != (Profile{}) {
 			t.Errorf("got %s, %+v, %v; want nil, zero, nil", raw, p, err)
 		}

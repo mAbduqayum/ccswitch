@@ -2,6 +2,7 @@ package claude
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -41,17 +42,39 @@ type keychainStore struct {
 func (s *keychainStore) Read() ([]byte, error) {
 	out, err := s.run(nil, "security", "find-generic-password", "-s", keychainService, "-w")
 	if err != nil {
-		// security exits non-zero both for a missing item and for real
-		// failures; either way there are no usable credentials, so surface
-		// ErrNotLoggedIn with the underlying detail attached.
-		return nil, fmt.Errorf("keychain item %q: %w: %w", keychainService, ErrNotLoggedIn, err)
+		// Only a missing item means "not logged in". Other failures (locked
+		// keychain, denied access) mean credentials exist but are
+		// unreachable — misreporting those as absence could later make a
+		// caller skip snapshotting live tokens before overwriting them.
+		if isKeychainNotFound(err) {
+			return nil, fmt.Errorf("keychain item %q: %w: %w", keychainService, ErrNotLoggedIn, err)
+		}
+		return nil, fmt.Errorf("read keychain item %q: %w", keychainService, err)
 	}
 	return bytes.TrimSuffix(out, []byte("\n")), nil
+}
+
+// isKeychainNotFound recognizes security(1)'s item-not-found failure: exit
+// code 44 (errSecItemNotFound), or its stderr wording for fakes and older
+// versions.
+func isKeychainNotFound(err error) bool {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 44 {
+		return true
+	}
+	return strings.Contains(err.Error(), "could not be found")
 }
 
 func (s *keychainStore) Write(raw []byte) error {
 	// The command is fed to `security -i` on stdin so the secret never
 	// appears in the process argument list. -U updates an existing item.
+	// security -i is line-oriented: a control character in the payload
+	// would terminate the quoted string early and let the remainder be
+	// parsed as further commands, so reject it outright — real credentials
+	// JSON is a single line.
+	if bytes.ContainsFunc(raw, func(r rune) bool { return r < 0x20 }) {
+		return fmt.Errorf("refusing to write keychain item %q: payload contains control characters", keychainService)
+	}
 	cmd := fmt.Sprintf("add-generic-password -U -a %s -s %s -w %s\n",
 		quoteSecurity(s.account), quoteSecurity(keychainService), quoteSecurity(string(raw)))
 	if _, err := s.run([]byte(cmd), "security", "-i"); err != nil {

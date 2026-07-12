@@ -34,14 +34,55 @@ func TestKeychainRead(t *testing.T) {
 	}
 }
 
-func TestKeychainReadFailureIsNotLoggedIn(t *testing.T) {
+func TestKeychainReadErrorClassification(t *testing.T) {
+	t.Run("missing item means not logged in", func(t *testing.T) {
+		run := func([]byte, string, ...string) ([]byte, error) {
+			return nil, errors.New("security: the specified item could not be found in the keychain")
+		}
+		ks := &keychainStore{run: run, account: "ali"}
+		_, err := ks.Read()
+		if !errors.Is(err, ErrNotLoggedIn) {
+			t.Errorf("Read error = %v, want ErrNotLoggedIn in chain", err)
+		}
+	})
+	t.Run("other failures are not misreported as absence", func(t *testing.T) {
+		run := func([]byte, string, ...string) ([]byte, error) {
+			return nil, errors.New("security: user interaction is not allowed (keychain locked)")
+		}
+		ks := &keychainStore{run: run, account: "ali"}
+		_, err := ks.Read()
+		if err == nil || errors.Is(err, ErrNotLoggedIn) {
+			t.Errorf("Read error = %v, must not wrap ErrNotLoggedIn", err)
+		}
+	})
+}
+
+func TestKeychainWriteRejectsControlCharacters(t *testing.T) {
+	called := false
 	run := func([]byte, string, ...string) ([]byte, error) {
-		return nil, errors.New("security: item could not be found in the keychain (exit 44)")
+		called = true
+		return nil, nil
 	}
 	ks := &keychainStore{run: run, account: "ali"}
-	_, err := ks.Read()
-	if !errors.Is(err, ErrNotLoggedIn) {
-		t.Errorf("Read error = %v, want ErrNotLoggedIn in chain", err)
+	// A newline would end the quoted -w string early and let the rest of
+	// the payload be parsed as further security(1) commands.
+	for _, raw := range []string{"{\"a\":\"b\"}\n", "{\"a\":\r\"b\"}", "{\"a\":\"b\x00\"}"} {
+		if err := ks.Write([]byte(raw)); err == nil {
+			t.Errorf("Write(%q) accepted a control character", raw)
+		}
+	}
+	if called {
+		t.Error("runner must not be invoked for rejected payloads")
+	}
+}
+
+func TestKeychainWriteError(t *testing.T) {
+	run := func([]byte, string, ...string) ([]byte, error) {
+		return nil, errors.New("security: could not create the item")
+	}
+	ks := &keychainStore{run: run, account: "ali"}
+	if err := ks.Write([]byte(`{}`)); err == nil {
+		t.Error("Write must propagate runner errors")
 	}
 }
 

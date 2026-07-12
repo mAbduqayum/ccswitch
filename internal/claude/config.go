@@ -32,7 +32,7 @@ func ReadOAuthAccount(configPath string) (json.RawMessage, Profile, error) {
 		return nil, Profile{}, fmt.Errorf("claude config %s is not valid JSON: %w", configPath, err)
 	}
 	raw, ok := top["oauthAccount"]
-	if !ok {
+	if !ok || string(raw) == "null" {
 		return nil, Profile{}, nil
 	}
 	var p Profile
@@ -47,6 +47,9 @@ func ReadOAuthAccount(configPath string) (json.RawMessage, Profile, error) {
 // with the file's permissions. Claude Code's config is large and holds
 // unrelated per-project state — this function must never touch it.
 func PatchOAuthAccount(configPath string, profile json.RawMessage) error {
+	if len(profile) == 0 || string(profile) == "null" {
+		return fmt.Errorf("refusing to write an empty oauthAccount to %s", configPath)
+	}
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return fmt.Errorf("read claude config: %w", err)
@@ -58,6 +61,9 @@ func PatchOAuthAccount(configPath string, profile json.RawMessage) error {
 	var top map[string]json.RawMessage
 	if err := json.Unmarshal(data, &top); err != nil {
 		return fmt.Errorf("claude config %s is not valid JSON: %w", configPath, err)
+	}
+	if top == nil { // the file contained JSON `null`
+		return fmt.Errorf("claude config %s is not a JSON object", configPath)
 	}
 	top["oauthAccount"] = profile
 	// 2-space indent, no trailing newline — the format Claude Code itself

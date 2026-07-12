@@ -46,10 +46,11 @@ func (s *Store) LoadState() (State, error) {
 	}
 	var st State
 	if err := json.Unmarshal(data, &st); err != nil {
-		return State{}, fmt.Errorf("%s is corrupt: %w", s.statePath(), err)
+		return State{}, fmt.Errorf("%s is corrupt: %w — fix or delete it (credential snapshots are stored separately and survive)",
+			s.statePath(), err)
 	}
-	if st.Version > stateVersion {
-		return State{}, fmt.Errorf("%s is schema version %d, but this ccswitch understands only version %d — upgrade ccswitch",
+	if st.Version < 1 || st.Version > stateVersion {
+		return State{}, fmt.Errorf("%s has schema version %d, but this ccswitch understands only version %d — upgrade ccswitch, or fix or delete the file",
 			s.statePath(), st.Version, stateVersion)
 	}
 	return st, nil
@@ -58,6 +59,9 @@ func (s *Store) LoadState() (State, error) {
 // SaveState writes the state atomically, stamping the current schema version.
 func (s *Store) SaveState(st State) error {
 	st.Version = stateVersion
+	if st.Accounts == nil {
+		st.Accounts = []Account{} // the schema promises an array, never null
+	}
 	out, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode state: %w", err)

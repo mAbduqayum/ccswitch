@@ -41,6 +41,12 @@ func WriteFile(path string, data []byte, perm os.FileMode) (err error) {
 	if err = os.Rename(tmp, path); err != nil {
 		return fmt.Errorf("rename %s to %s: %w", tmp, path, err)
 	}
+	// Sync the directory so the rename itself survives power loss;
+	// best-effort, since not every filesystem supports fsync on a dir.
+	if d, derr := os.Open(dir); derr == nil {
+		_ = d.Sync()
+		d.Close()
+	}
 	return nil
 }
 

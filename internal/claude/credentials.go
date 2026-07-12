@@ -34,7 +34,10 @@ type CredentialStore interface {
 func NewCredentialStore(env Env, run ExecRunner) CredentialStore {
 	path := env.CredentialsPath()
 	if env.GOOS == "darwin" {
-		if _, err := os.Stat(path); err != nil {
+		// Only a definitively absent file selects the keychain; on stat
+		// errors the file store is kept so its Read/Write surface the real
+		// problem instead of silently switching backends.
+		if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
 			return &keychainStore{run: run, account: env.User}
 		}
 	}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"runtime/debug"
 )
 
@@ -9,6 +10,13 @@ import (
 var version = ""
 
 func main() {
+	// Temporary stub until the cobra CLI lands: fail loudly on any
+	// arguments so pipelines (completions generation, Nix postInstall)
+	// can't silently package garbage.
+	if len(os.Args) > 1 {
+		fmt.Fprintf(os.Stderr, "ccswitch: CLI not implemented yet (got %q)\n", os.Args[1:])
+		os.Exit(1)
+	}
 	fmt.Println("ccswitch", versionString())
 }
 

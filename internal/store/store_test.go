@@ -82,6 +82,32 @@ func TestLoadStateErrors(t *testing.T) {
 			t.Errorf("error = %v, want upgrade hint", err)
 		}
 	})
+	t.Run("missing version field rejected", func(t *testing.T) {
+		s := New(t.TempDir())
+		if err := os.WriteFile(filepath.Join(s.Dir(), "state.json"), []byte(`{"accounts": []}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.LoadState(); err == nil {
+			t.Error("state without a version field must be rejected")
+		}
+	})
+}
+
+func TestSaveStateWritesAccountsArrayNotNull(t *testing.T) {
+	s := New(t.TempDir())
+	if err := s.SaveState(State{}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(s.Dir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), `"accounts": null`) {
+		t.Errorf("state.json contains accounts:null, schema promises an array:\n%s", data)
+	}
+	if !strings.Contains(string(data), `"accounts": []`) {
+		t.Errorf("state.json missing empty accounts array:\n%s", data)
+	}
 }
 
 func TestSnapshotRoundTrip(t *testing.T) {
@@ -179,6 +205,12 @@ func TestUUIDPathTraversalRejected(t *testing.T) {
 		if _, err := s.ReadSnapshot(uuid); err == nil {
 			t.Errorf("ReadSnapshot(%q) accepted a bad uuid", uuid)
 		}
+		if err := s.WriteProfile(uuid, []byte("{}")); err == nil {
+			t.Errorf("WriteProfile(%q) accepted a bad uuid", uuid)
+		}
+		if _, err := s.ReadProfile(uuid); err == nil {
+			t.Errorf("ReadProfile(%q) accepted a bad uuid", uuid)
+		}
 		if err := s.RemoveAccount(uuid); err == nil {
 			t.Errorf("RemoveAccount(%q) accepted a bad uuid", uuid)
 		}
@@ -186,7 +218,8 @@ func TestUUIDPathTraversalRejected(t *testing.T) {
 }
 
 func TestLockExcludesSecondHolder(t *testing.T) {
-	s := New(t.TempDir())
+	// The store dir doesn't exist yet — Lock must create it.
+	s := New(filepath.Join(t.TempDir(), "fresh", "store"))
 	unlock, err := s.Lock()
 	if err != nil {
 		t.Fatalf("first Lock: %v", err)
@@ -199,7 +232,19 @@ func TestLockExcludesSecondHolder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Lock after unlock: %v", err)
 	}
+	// Double unlock must be a no-op — in particular it must not release a
+	// lock acquired in between.
 	unlock2()
+	unlock2()
+	unlock3, err := s.Lock()
+	if err != nil {
+		t.Fatalf("Lock after double unlock: %v", err)
+	}
+	unlock2() // stale unlock while unlock3 holds the lock
+	if _, err := s.Lock(); err == nil {
+		t.Error("stale unlock released a lock it does not own")
+	}
+	unlock3()
 }
 
 func TestIndexLookups(t *testing.T) {

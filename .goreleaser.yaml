@@ -29,6 +29,8 @@ archives:
       {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
     files:
       - completions/*
+      - LICENSE
+      - README.md
 
 checksum:
   name_template: checksums.txt

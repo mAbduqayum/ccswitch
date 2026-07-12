@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"syscall"
 )
 
@@ -27,10 +28,14 @@ func (s *Store) Lock() (unlock func(), err error) {
 		}
 		return nil, fmt.Errorf("lock store: %w", err)
 	}
+	var once sync.Once
 	return func() {
 		// Closing the fd releases the flock; the explicit unlock just makes
-		// the release immediate and intentional.
-		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-		f.Close()
+		// the release immediate. sync.Once makes double-unlock safe by
+		// design rather than by accident.
+		once.Do(func() {
+			_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+			f.Close()
+		})
 	}, nil
 }
