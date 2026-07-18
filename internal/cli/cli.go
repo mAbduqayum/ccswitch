@@ -28,7 +28,11 @@ type Options struct {
 	Version string
 	IO      IO
 	App     *app.App
-	RunTUI  func(*app.App) error // nil = no TUI wired; root falls back to list
+	// RunTUI launches the TUI, which owns the real process streams and
+	// ignores IO — safe only because preflight skips discovery on the
+	// root+TTY path, so nothing is ever buffered ahead of it from stdin.
+	// nil = no TUI wired; root falls back to list.
+	RunTUI func(*app.App) error
 }
 
 // Execute runs the CLI and returns the process exit code.

@@ -341,6 +341,64 @@ func TestRenameFlow(t *testing.T) {
 			t.Errorf("alias = %q, want the typed r", got)
 		}
 	})
+	t.Run("letters shared with dialog keys type into the input", func(t *testing.T) {
+		a := newTestApp(t)
+		seedTwoAccounts(t, a)
+		m := loaded(t, a)
+		m.table.SetCursor(1)
+		m = drive(t, m, keyMsg("r"))
+		// One rune per KeyMsg, exactly as terminals deliver typing. "andy"
+		// contains n (dialog no), d (remove), y (dialog yes) — if any of
+		// them acted, this keystroke sequence would delete the account.
+		for _, r := range "andy" {
+			m = drive(t, m, keyMsg(string(r)))
+		}
+		if m.mode != modeRename {
+			t.Fatalf("mode = %v, want still rename", m.mode)
+		}
+		m = drive(t, m, keyMsg("enter"))
+		if got := alias(t, a); got != "andy" {
+			t.Errorf("alias = %q, want andy", got)
+		}
+		st, err := a.Store.LoadState()
+		if err != nil || len(st.Accounts) != 2 {
+			t.Fatalf("accounts = %d, %v — typing an alias must never remove an account", len(st.Accounts), err)
+		}
+	})
+	t.Run("ctrl+c cancels the input without quitting", func(t *testing.T) {
+		a := newTestApp(t)
+		seedTwoAccounts(t, a)
+		m := loaded(t, a)
+		m.table.SetCursor(1)
+		m = drive(t, m, keyMsg("r"))
+		m = drive(t, m, keyMsg("x"))
+		m = drive(t, m, keyMsg("ctrl+c"))
+		if m.mode != modeList {
+			t.Errorf("mode = %v, want list", m.mode)
+		}
+		if got := alias(t, a); got != "" {
+			t.Errorf("alias = %q, want unchanged", got)
+		}
+	})
+}
+
+func TestUnknownLoginDuringDialogIsQueued(t *testing.T) {
+	a := newTestApp(t)
+	seedTwoAccounts(t, a)
+	m := loaded(t, a)
+	m = drive(t, m, keyMsg("r"))
+	seedUnknownLogin(t, a)
+	m = drive(t, m, m.discoverCmd()())
+	if m.mode != modeRename {
+		t.Fatalf("mode = %v, discovery must not stomp an open dialog", m.mode)
+	}
+	m = drive(t, m, keyMsg("esc"))
+	if m.mode != modeConfirmAdd {
+		t.Fatalf("mode = %v, want the queued confirm-add once the dialog closes", m.mode)
+	}
+	if !strings.Contains(m.View(), "n@x.com") {
+		t.Error("queued dialog does not name the discovered login")
+	}
 }
 
 func TestCredsChangedTriggersRediscovery(t *testing.T) {
@@ -362,6 +420,71 @@ func TestWatcherFailureIsANote(t *testing.T) {
 	}
 	if !strings.Contains(m.View(), "watch off") {
 		t.Error("watch note not shown")
+	}
+}
+
+func TestWatcher(t *testing.T) {
+	start := func(t *testing.T) (*app.App, *watcher) {
+		t.Helper()
+		a := newTestApp(t)
+		if err := os.MkdirAll(filepath.Dir(a.Env.CredentialsPath()), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		msg := New(a).startWatchCmd()()
+		started, ok := msg.(watchStartedMsg)
+		if !ok || started.err != nil {
+			t.Fatalf("startWatchCmd = %#v", msg)
+		}
+		return a, started.w
+	}
+
+	t.Run("credentials write yields one credsChangedMsg", func(t *testing.T) {
+		a, w := start(t)
+		t.Cleanup(w.close)
+		done := make(chan tea.Msg, 1)
+		go func() { done <- w.waitCmd()() }()
+		if err := os.WriteFile(a.Env.CredentialsPath(), credsJSON("a", freshExpiry, refreshOK), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case got := <-done:
+			if _, ok := got.(credsChangedMsg); !ok {
+				t.Errorf("waitCmd = %#v, want credsChangedMsg", got)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("waitCmd never reported the write")
+		}
+	})
+
+	t.Run("close unblocks a pending waitCmd", func(t *testing.T) {
+		_, w := start(t)
+		done := make(chan tea.Msg, 1)
+		go func() { done <- w.waitCmd()() }()
+		w.close()
+		select {
+		case got := <-done:
+			if got != nil {
+				t.Errorf("waitCmd = %#v, want nil after close", got)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("waitCmd still blocked after close")
+		}
+	})
+}
+
+func TestColumnsFitTerminalWidth(t *testing.T) {
+	const cellPadding = 2 // bubbles DefaultStyles pads every cell by 2
+	for _, width := range []int{0, 60, 72, 80, 100, 200} {
+		rendered := 0
+		for _, c := range columns(width) {
+			rendered += c.Width + cellPadding
+		}
+		if width >= 72 && rendered > width {
+			t.Errorf("width %d: rendered row is %d chars wide, gets clipped", width, rendered)
+		}
+		if rendered > 88 {
+			t.Errorf("width %d: rendered row is %d chars, want the 88-char cap", width, rendered)
+		}
 	}
 }
 

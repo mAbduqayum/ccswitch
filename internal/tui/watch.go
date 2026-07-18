@@ -19,6 +19,10 @@ type watcher struct {
 	relevant map[string]bool // base names that trigger rediscovery
 }
 
+// close releases the inotify fd and unblocks a waitCmd goroutine still
+// receiving on the event channel.
+func (w *watcher) close() { _ = w.fs.Close() }
+
 // startWatchCmd creates the watcher off the UI thread. Failure is reported
 // as a note, never as a fatal error — the TUI works without it.
 func (m Model) startWatchCmd() tea.Cmd {
@@ -59,7 +63,10 @@ func (w *watcher) waitCmd() tea.Cmd {
 				time.Sleep(debounce)
 				for {
 					select {
-					case <-w.fs.Events:
+					case _, ok := <-w.fs.Events:
+						if !ok { // closed while draining: don't spin on zero values
+							return nil
+						}
 					default:
 						return credsChangedMsg{}
 					}

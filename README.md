@@ -54,7 +54,10 @@ Running `ccswitch` with no arguments opens the TUI:
 | `q`, `ctrl+c` | quit |
 
 The TUI watches `~/.claude` and picks up logins made in other terminals
-while it is open.
+while it is open. That relies on file events: profile-only config changes
+and macOS Keychain updates don't emit any, so those show up on the next
+run instead (a login always rewrites the credentials file, so logins are
+still noticed).
 
 Everything is also scriptable:
 
@@ -73,6 +76,11 @@ ccswitch completions zsh     # bash | zsh | fish
 Accounts are addressed by list number, email, alias, or account uuid.
 `--json` output is stable metadata (email, alias, plan, token status,
 expiry classification) and by construction never contains token values.
+
+One quirk to know about in pty harnesses (CI, expect scripts): on a
+pseudo-terminal that never answers terminal queries, startup pauses ~5 s —
+bubbletea v1 probes the terminal background at import time. Piped
+invocations without a tty skip the probe entirely.
 
 ## Auto-discovery
 
@@ -98,8 +106,9 @@ Claude Code keeps its login in two places: the OAuth credentials
 1. snapshots the live credentials into the current account's slot — **before**
    anything else, so token rotation is never lost;
 2. atomically writes the target's snapshot as the live credentials (0600);
-3. patches only the `oauthAccount` key in the config — every other key is
-   preserved byte-for-byte;
+3. patches only the `oauthAccount` key in the config — every other value
+   passes through untouched (only top-level key order and whitespace
+   normalize);
 4. updates its own active marker.
 
 ccswitch's state lives in `$XDG_DATA_HOME/ccswitch` (default

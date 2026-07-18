@@ -34,15 +34,12 @@ func tableStyles() table.Styles {
 }
 
 // columns sizes the table for the given terminal width; the account column
-// absorbs the slack.
+// absorbs the slack. Every cell adds 2 chars of padding (bubbles
+// DefaultStyles), so the rendered row is 44 chars wider than ACCOUNT — the
+// slack math subtracts that plus a 6-char margin. Below 72 columns the
+// ACCOUNT floor wins and the row may clip.
 func columns(width int) []table.Column {
-	account := 28
-	if width > 66 {
-		account = width - 38
-	}
-	if account > 44 {
-		account = 44
-	}
+	account := min(44, max(28, width-50))
 	return []table.Column{
 		{Title: "", Width: 2},
 		{Title: "#", Width: 3},

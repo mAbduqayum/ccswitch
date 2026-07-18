@@ -12,18 +12,25 @@ import (
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/mAbduqayum/ccswitch/internal/app"
 	"github.com/mAbduqayum/ccswitch/internal/store"
 )
 
 // Run starts the TUI and blocks until exit.
+//
+// Terminal background detection (for AdaptiveColor) already happened long
+// before this: bubbletea v1's package init queries it with an OSC 11 probe
+// at import time. On a pty that never answers, that probe is a one-time ~5s
+// stall at process start — for every subcommand, not just the TUI. Removed
+// upstream in bubbletea v2.
 func Run(a *app.App) error {
-	// Resolve the terminal background before bubbletea owns the tty, so
-	// AdaptiveColor picks the right variants.
-	_ = lipgloss.HasDarkBackground()
-	_, err := tea.NewProgram(New(a), tea.WithAltScreen()).Run()
+	final, err := tea.NewProgram(New(a), tea.WithAltScreen()).Run()
+	// bubbletea does not wait for in-flight command goroutines; close the
+	// watcher so the one blocked in waitCmd unblocks and the fd is released.
+	if m, ok := final.(Model); ok && m.watch != nil {
+		m.watch.close()
+	}
 	return err
 }
 
@@ -82,6 +89,7 @@ type Model struct {
 	input textinput.Model
 
 	pendingAdd   app.Discovery
+	queuedAdd    *app.Discovery // unknown login found while a dialog was open
 	removeTarget store.Account
 	renameTarget store.Account
 
@@ -203,9 +211,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = "error: " + msg.err.Error()
 			return m, m.loadCmd()
 		}
-		if msg.d.Status == app.Unknown && m.mode == modeList {
+		switch {
+		case msg.d.Status != app.Unknown:
+			m.queuedAdd = nil // a fresher discovery supersedes anything queued
+		case m.mode == modeList:
 			m.mode = modeConfirmAdd
 			m.pendingAdd = msg.d
+		case m.mode == modeConfirmAdd:
+			m.pendingAdd = msg.d // refresh the open dialog with the latest login
+		default:
+			// Don't stomp an open rename/remove dialog; ask when it closes.
+			d := msg.d
+			m.queuedAdd = &d
 		}
 		return m, m.loadCmd()
 
@@ -259,11 +276,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case modeConfirmAdd:
 		switch {
 		case key.Matches(msg, keys.Confirm):
-			m.mode = modeList
+			m.leaveDialog()
 			return m, m.addCmd(m.pendingAdd)
 		case key.Matches(msg, keys.Cancel, keys.Quit):
-			m.mode = modeList
-			m.status = "login not added — it will be asked about again next start"
+			m.leaveDialog()
+			m.status = "login not added — ccswitch will ask again"
 			return m, nil
 		}
 		return m, nil
@@ -271,10 +288,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case modeConfirmRemove:
 		switch {
 		case key.Matches(msg, keys.Confirm):
-			m.mode = modeList
+			m.leaveDialog()
 			return m, m.removeCmd(m.removeTarget)
 		case key.Matches(msg, keys.Cancel, keys.Quit):
-			m.mode = modeList
+			m.leaveDialog()
 			m.status = "not removed"
 			return m, nil
 		}
@@ -283,10 +300,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case modeRename:
 		switch {
 		case key.Matches(msg, keys.Accept):
-			m.mode = modeList
+			m.leaveDialog()
 			return m, m.renameCmd(m.renameTarget, strings.TrimSpace(m.input.Value()))
-		case key.Matches(msg, keys.Cancel):
-			m.mode = modeList
+		case key.Matches(msg, keys.CancelInput):
+			m.leaveDialog()
 			m.status = "rename cancelled"
 			return m, nil
 		}
@@ -324,6 +341,18 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
+// leaveDialog returns to the list — or straight into the confirm-add dialog
+// when an unknown login was discovered while another dialog was open.
+func (m *Model) leaveDialog() {
+	if m.queuedAdd != nil {
+		m.mode = modeConfirmAdd
+		m.pendingAdd = *m.queuedAdd
+		m.queuedAdd = nil
+		return
+	}
+	m.mode = modeList
+}
+
 func (m *Model) setRows(rows []accountRow) {
 	m.rows = rows
 	tableRows := make([]table.Row, 0, len(rows))
@@ -337,11 +366,9 @@ func (m *Model) setRows(rows []accountRow) {
 		})
 	}
 	m.table.SetRows(tableRows)
-	// SetHeight subtracts the header (title line + border) internally.
+	// SetHeight subtracts the header (title line + border) internally;
+	// SetRows already clamped the cursor.
 	m.table.SetHeight(max(len(rows), 1) + tableHeaderHeight)
-	if m.table.Cursor() >= len(rows) && len(rows) > 0 {
-		m.table.SetCursor(len(rows) - 1)
-	}
 }
 
 func (m Model) selected() (accountRow, bool) {
