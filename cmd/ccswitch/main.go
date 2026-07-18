@@ -5,6 +5,8 @@ import (
 	"os"
 	"runtime/debug"
 
+	"golang.org/x/term"
+
 	"github.com/mAbduqayum/ccswitch/internal/app"
 	"github.com/mAbduqayum/ccswitch/internal/claude"
 	"github.com/mAbduqayum/ccswitch/internal/cli"
@@ -35,9 +37,10 @@ func main() {
 	os.Exit(cli.Execute(opts, os.Args[1:]))
 }
 
+// isTTY asks the terminal driver instead of the char-device heuristic,
+// which would misclassify /dev/null and fire prompts in cron jobs.
 func isTTY(f *os.File) bool {
-	info, err := f.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
+	return term.IsTerminal(int(f.Fd()))
 }
 
 func versionString() string {

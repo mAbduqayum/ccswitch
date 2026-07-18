@@ -33,8 +33,12 @@ func TestDiscoverCredsReadError(t *testing.T) {
 func TestDiscoverMalformedCreds(t *testing.T) {
 	a := newTestApp(t)
 	writeLiveCreds(t, a, []byte("not json"))
-	if _, err := a.Discover(); err == nil {
+	_, err := a.Discover()
+	if err == nil {
 		t.Fatal("malformed credentials must be an error, not a status")
+	}
+	if !errors.Is(err, ErrLiveCredsMalformed) {
+		t.Errorf("error = %v, want ErrLiveCredsMalformed so callers can degrade it", err)
 	}
 }
 

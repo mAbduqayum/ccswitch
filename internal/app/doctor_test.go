@@ -122,6 +122,16 @@ func TestDoctorDuplicates(t *testing.T) {
 	})
 }
 
+func TestDoctorDanglingActiveMarker(t *testing.T) {
+	a := newTestApp(t)
+	saveState(t, a, store.State{Active: "uuid-gone", Accounts: []store.Account{{UUID: "uuid-a", Email: "a@x.com"}}})
+	writeSnapshot(t, a, "uuid-a", credsJSON("a", staleExpiry, refreshOK))
+	c := findCheck(t, a.Doctor(), "active marker")
+	if c.Status != Warn || !strings.Contains(c.Detail, "uuid-gone") {
+		t.Errorf("active marker = %+v, want Warn naming uuid-gone", c)
+	}
+}
+
 func TestDoctorOrphans(t *testing.T) {
 	a := newTestApp(t)
 	saveState(t, a, store.State{})

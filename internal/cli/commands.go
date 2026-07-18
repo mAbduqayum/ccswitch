@@ -164,8 +164,9 @@ func (r *runner) remove(arg string, yes bool) error {
 			return err
 		}
 		if !ok {
-			fmt.Fprintln(r.io.Err, "aborted")
-			return nil
+			// Non-zero so wrappers checking $? never mistake a declined
+			// removal for a completed one.
+			return fmt.Errorf("aborted — %s was not removed", acct.Email)
 		}
 	}
 	if err := r.app.Remove(acct.UUID); err != nil {

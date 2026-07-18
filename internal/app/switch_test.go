@@ -119,8 +119,10 @@ func TestSwitchPreservesUnrelatedConfig(t *testing.T) {
 
 func TestSwitchMissingSnapshotAbortsWithZeroSideEffects(t *testing.T) {
 	w := newSwitchWorld(t)
-	ghost := store.Account{UUID: "uuid-ghost", Email: "g@x.com"}
-	_, err := w.a.Switch(ghost, false)
+	if err := os.Remove(filepath.Join(w.a.Store.Dir(), "accounts", "uuid-b", "credentials.json")); err != nil {
+		t.Fatal(err)
+	}
+	_, err := w.a.Switch(w.acctB, false)
 	if err == nil || !strings.Contains(err.Error(), "no credentials snapshot") {
 		t.Fatalf("error = %v, want missing-snapshot message", err)
 	}
@@ -130,6 +132,24 @@ func TestSwitchMissingSnapshotAbortsWithZeroSideEffects(t *testing.T) {
 	}
 	if got := readSnapshot(t, w.a, "uuid-a"); !bytes.Equal(got, w.snapA) {
 		t.Error("A's snapshot changed despite the abort")
+	}
+	if st := loadState(t, w.a); st.Active != "uuid-a" {
+		t.Errorf("Active = %q, want untouched uuid-a", st.Active)
+	}
+}
+
+// TestSwitchUnregisteredTargetAborts: the target was resolved before the
+// lock; a concurrent remove must abort the switch, not restore a leftover
+// snapshot and dangle the active marker.
+func TestSwitchUnregisteredTargetAborts(t *testing.T) {
+	w := newSwitchWorld(t)
+	ghost := store.Account{UUID: "uuid-ghost", Email: "g@x.com"}
+	_, err := w.a.Switch(ghost, false)
+	if err == nil || !strings.Contains(err.Error(), "no longer registered") {
+		t.Fatalf("error = %v, want unregistered-target abort", err)
+	}
+	if got := readLiveCreds(t, w.a); !bytes.Equal(got, w.liveA) {
+		t.Error("live credentials changed despite the abort")
 	}
 	if st := loadState(t, w.a); st.Active != "uuid-a" {
 		t.Errorf("Active = %q, want untouched uuid-a", st.Active)

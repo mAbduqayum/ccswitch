@@ -75,6 +75,11 @@ func (a *App) Doctor() []Check {
 	}
 	add("state", OK, "%d account(s) registered", len(st.Accounts))
 
+	// Active marker consistency.
+	if st.Active != "" && st.IndexByUUID(st.Active) == -1 {
+		add("active marker", Warn, "points at unregistered uuid %s — it heals on the next discovery", st.Active)
+	}
+
 	// Duplicates.
 	seenUUID := map[string]bool{}
 	seenEmail := map[string]bool{}

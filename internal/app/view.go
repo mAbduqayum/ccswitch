@@ -28,7 +28,7 @@ func (a *App) TokenStatus(uuid string) (status, plan string) {
 	case left <= 0:
 		return "expired", meta.SubscriptionType
 	case left < 7*24*time.Hour:
-		return "renew soon", meta.SubscriptionType
+		return "renew-soon", meta.SubscriptionType
 	default:
 		return "ok", meta.SubscriptionType
 	}

@@ -38,6 +38,11 @@ type Discovery struct {
 	Account    store.Account // set when Status == Known
 }
 
+// ErrLiveCredsMalformed reports that live credentials exist but cannot be
+// parsed. Read-only callers may degrade it to a warning; switching hard-fails
+// on it independently.
+var ErrLiveCredsMalformed = errors.New("live credentials are malformed")
+
 // Discover inspects the live login without mutating anything.
 func (a *App) Discover() (Discovery, error) {
 	raw, err := a.Creds.Read()
@@ -49,7 +54,7 @@ func (a *App) Discover() (Discovery, error) {
 	}
 	meta, err := claude.ParseCredentials(raw)
 	if err != nil {
-		return Discovery{}, fmt.Errorf("%s: %w", a.Creds.Location(), err)
+		return Discovery{}, fmt.Errorf("%w: %s: %w", ErrLiveCredsMalformed, a.Creds.Location(), err)
 	}
 	d := Discovery{RawCreds: raw, Meta: meta}
 

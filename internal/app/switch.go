@@ -37,6 +37,11 @@ func (a *App) Switch(target store.Account, force bool) (SwitchResult, error) {
 	if err != nil {
 		return res, err
 	}
+	// The caller resolved target before the lock; a concurrent remove may
+	// have deregistered it since.
+	if st.IndexByUUID(target.UUID) == -1 {
+		return res, fmt.Errorf("account %s is no longer registered — see `ccswitch list`", target.Email)
+	}
 
 	// Read the target snapshot before writing anything, so a missing
 	// snapshot aborts with zero side effects.

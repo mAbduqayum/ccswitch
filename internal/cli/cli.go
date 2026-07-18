@@ -73,6 +73,12 @@ func (r *runner) preflight(cmd *cobra.Command, _ []string) error {
 	case "help", cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd:
 		return nil
 	}
+	// When the TUI is about to run it does its own discovery with a proper
+	// dialog; prompting here would also leave bufio-buffered stdin bytes
+	// that bubbletea never sees.
+	if !cmd.HasParent() && r.runTUI != nil && r.io.IsTTY {
+		return nil
+	}
 	return r.discover()
 }
 
@@ -80,6 +86,12 @@ func (r *runner) preflight(cmd *cobra.Command, _ []string) error {
 // one — y/N prompt on a TTY, a stderr notice otherwise.
 func (r *runner) discover() error {
 	d, err := r.app.Discover()
+	if errors.Is(err, app.ErrLiveCredsMalformed) {
+		// Read-only commands still work without a live identity; switch
+		// hard-fails on this on its own.
+		fmt.Fprintf(r.io.Err, "warning: %v — run `claude /login` to repair\n", err)
+		return nil
+	}
 	if err != nil {
 		return err
 	}

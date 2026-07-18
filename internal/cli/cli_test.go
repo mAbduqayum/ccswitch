@@ -16,10 +16,12 @@ import (
 )
 
 var (
-	testNow     = time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
-	staleExpiry = testNow.Add(1 * time.Hour)
-	freshExpiry = testNow.Add(4 * time.Hour)
-	refreshOK   = testNow.Add(30 * 24 * time.Hour)
+	testNow        = time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	staleExpiry    = testNow.Add(1 * time.Hour)
+	freshExpiry    = testNow.Add(4 * time.Hour)
+	refreshOK      = testNow.Add(30 * 24 * time.Hour)
+	refreshSoon    = testNow.Add(3 * 24 * time.Hour)
+	refreshExpired = testNow.Add(-2 * time.Hour)
 )
 
 func newTestApp(t *testing.T) *app.App {
@@ -261,15 +263,26 @@ func TestRemove(t *testing.T) {
 			t.Error("account still present")
 		}
 	})
-	t.Run("declined on a tty", func(t *testing.T) {
+	t.Run("declined on a tty exits non-zero", func(t *testing.T) {
 		a := newTestApp(t)
 		seedTwoAccounts(t, a)
 		code, _, stderr := run(t, a, true, "n\n", "rm", "b@x.com")
-		if code != 0 || !strings.Contains(stderr, "aborted") {
-			t.Errorf("exit = %d, stderr = %q", code, stderr)
+		if code != 1 || !strings.Contains(stderr, "aborted") {
+			t.Errorf("exit = %d, stderr = %q; a declined removal must not look successful", code, stderr)
 		}
 		if !present(t, a, "uuid-b") {
 			t.Error("account removed despite declining")
+		}
+	})
+	t.Run("EOF declines and exits non-zero", func(t *testing.T) {
+		a := newTestApp(t)
+		seedTwoAccounts(t, a)
+		code, _, stderr := run(t, a, true, "", "remove", "b@x.com")
+		if code != 1 || !strings.Contains(stderr, "aborted") {
+			t.Errorf("exit = %d, stderr = %q", code, stderr)
+		}
+		if !present(t, a, "uuid-b") {
+			t.Error("account removed on EOF")
 		}
 	})
 	t.Run("no tty requires --yes", func(t *testing.T) {
@@ -444,6 +457,157 @@ func TestDiscoveryPrompt(t *testing.T) {
 	})
 }
 
+func TestSwitchForce(t *testing.T) {
+	seedUnknownLive := func(t *testing.T) *app.App {
+		t.Helper()
+		a := newTestApp(t)
+		seedTwoAccounts(t, a)
+		writeLiveCreds(t, a, credsJSON("n", freshExpiry, refreshOK))
+		writeLiveConfig(t, a, profileJSON("uuid-n", "n@x.com"))
+		return a
+	}
+	t.Run("without force the switch refuses", func(t *testing.T) {
+		a := seedUnknownLive(t)
+		code, _, stderr := run(t, a, false, "", "switch", "b@x.com")
+		if code != 1 || !strings.Contains(stderr, "--force") {
+			t.Errorf("exit = %d, stderr = %q", code, stderr)
+		}
+	})
+	t.Run("force discards with a warning", func(t *testing.T) {
+		a := seedUnknownLive(t)
+		code, out, stderr := run(t, a, false, "", "switch", "--force", "b@x.com")
+		if code != 0 || !strings.Contains(out, "switched to b@x.com") {
+			t.Fatalf("exit = %d, out = %q, stderr = %q", code, out, stderr)
+		}
+		if !strings.Contains(stderr, "discarded") {
+			t.Errorf("stderr = %q, want a discard warning", stderr)
+		}
+	})
+}
+
+func TestSwitchWarnsAboutRunningClaude(t *testing.T) {
+	a := newTestApp(t)
+	seedTwoAccounts(t, a)
+	a.Pgrep = func() bool { return true }
+	code, _, stderr := run(t, a, false, "", "switch")
+	if code != 0 || !strings.Contains(stderr, "restart") {
+		t.Errorf("exit = %d, stderr = %q", code, stderr)
+	}
+}
+
+func TestTokenStatusClassifications(t *testing.T) {
+	tests := []struct {
+		name string
+		snap []byte // nil = no snapshot
+		want string
+	}{
+		{"missing", nil, "missing"},
+		{"invalid", []byte("junk"), "invalid"},
+		{"unknown", []byte(`{"claudeAiOauth":{"accessToken":"sk-test-x","refreshToken":"rt-test-x","expiresAt":1}}`), "unknown"},
+		{"expired", credsJSON("a", staleExpiry, refreshExpired), "expired"},
+		{"renew-soon", credsJSON("a", staleExpiry, refreshSoon), "renew-soon"},
+		{"ok", credsJSON("a", staleExpiry, refreshOK), "ok"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := newTestApp(t)
+			st := store.State{Accounts: []store.Account{{UUID: "uuid-a", Email: "a@x.com", AddedAt: testNow}}}
+			if err := a.Store.SaveState(st); err != nil {
+				t.Fatal(err)
+			}
+			if tt.snap != nil {
+				if err := a.Store.WriteSnapshot("uuid-a", tt.snap); err != nil {
+					t.Fatal(err)
+				}
+			}
+			code, out, _ := run(t, a, false, "", "list", "--json")
+			if code != 0 {
+				t.Fatalf("exit = %d", code)
+			}
+			var views []struct {
+				TokenStatus string `json:"tokenStatus"`
+			}
+			if err := json.Unmarshal([]byte(out), &views); err != nil {
+				t.Fatalf("invalid JSON: %v", err)
+			}
+			if len(views) != 1 || views[0].TokenStatus != tt.want {
+				t.Errorf("tokenStatus = %+v, want %q", views, tt.want)
+			}
+		})
+	}
+}
+
+func TestStatusWithoutActiveAccount(t *testing.T) {
+	a := newTestApp(t)
+	seedTwoAccounts(t, a)
+	st, err := a.Store.LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Active = ""
+	if err := a.Store.SaveState(st); err != nil {
+		t.Fatal(err)
+	}
+	code, out, _ := run(t, a, false, "", "status")
+	if code != 0 || !strings.Contains(out, "none active") {
+		t.Errorf("exit = %d, out = %q", code, out)
+	}
+}
+
+func TestDynamicCompletionListsAccountsAndSkipsDiscovery(t *testing.T) {
+	a := newTestApp(t)
+	seedTwoAccounts(t, a)
+	writeLiveCreds(t, a, credsJSON("n", freshExpiry, refreshOK))
+	writeLiveConfig(t, a, profileJSON("uuid-n", "n@x.com"))
+	code, out, stderr := run(t, a, true, "", "__complete", "switch", "")
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %q", code, stderr)
+	}
+	for _, want := range []string{"a@x.com", "b@x.com", "work"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("completions missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(stderr, "[y/N]") || strings.Contains(stderr, "not managed") {
+		t.Errorf("discovery ran during __complete: %q", stderr)
+	}
+}
+
+func TestHelpSkipsDiscovery(t *testing.T) {
+	a := newTestApp(t)
+	writeLiveCreds(t, a, credsJSON("n", freshExpiry, refreshOK))
+	writeLiveConfig(t, a, profileJSON("uuid-n", "n@x.com"))
+	code, out, stderr := run(t, a, true, "", "help")
+	if code != 0 || !strings.Contains(out, "Usage:") {
+		t.Errorf("exit = %d, out = %q", code, out)
+	}
+	if strings.Contains(stderr, "[y/N]") {
+		t.Errorf("discovery prompted during help: %q", stderr)
+	}
+}
+
+func TestMalformedLiveCredsDegradeForReadCommands(t *testing.T) {
+	a := newTestApp(t)
+	seedTwoAccounts(t, a)
+	writeLiveCreds(t, a, []byte(`{"claudeAiOauth":{"accessToken":"sk-test-x",`))
+	code, out, stderr := run(t, a, false, "", "list")
+	if code != 0 || !strings.Contains(out, "a@x.com") {
+		t.Errorf("exit = %d, out = %q, stderr = %q — list must survive a broken live file", code, out, stderr)
+	}
+	if !strings.Contains(stderr, "claude /login") {
+		t.Errorf("stderr = %q, want a repair hint", stderr)
+	}
+	if strings.Contains(out+stderr, "sk-test-") {
+		t.Error("the warning leaked token bytes")
+	}
+
+	// Switching keeps its own hard refusal.
+	code, _, stderr = run(t, a, false, "", "switch")
+	if code != 1 || !strings.Contains(stderr, "malformed") {
+		t.Errorf("switch exit = %d, stderr = %q, want a hard abort", code, stderr)
+	}
+}
+
 func TestRootWithoutTTYListsAccounts(t *testing.T) {
 	a := newTestApp(t)
 	seedTwoAccounts(t, a)
@@ -456,6 +620,11 @@ func TestRootWithoutTTYListsAccounts(t *testing.T) {
 func TestRootWithTTYLaunchesTUI(t *testing.T) {
 	a := newTestApp(t)
 	seedTwoAccounts(t, a)
+	// An unknown live login must NOT prompt here — the TUI runs its own
+	// discovery with a dialog, and a CLI prompt would eat stdin bytes that
+	// belong to bubbletea.
+	writeLiveCreds(t, a, credsJSON("n", freshExpiry, refreshOK))
+	writeLiveConfig(t, a, profileJSON("uuid-n", "n@x.com"))
 	launched := false
 	var out, errBuf bytes.Buffer
 	code := Execute(Options{
@@ -469,6 +638,9 @@ func TestRootWithTTYLaunchesTUI(t *testing.T) {
 	}
 	if out.Len() != 0 {
 		t.Errorf("stdout = %q, want the TUI to own the terminal", out.String())
+	}
+	if strings.Contains(errBuf.String(), "[y/N]") {
+		t.Errorf("stderr = %q, the pre-TUI discovery prompt must not fire", errBuf.String())
 	}
 }
 
@@ -498,6 +670,9 @@ func TestNoOutputLeaksTokens(t *testing.T) {
 		{"doctor", "--json"},
 		{"switch"},
 		{"switch", "work"},
+		{"switch", "nope"},
+		{"remove", "--yes", "b@x.com"},
+		{"alias", "b@x.com", "personal"},
 	}
 	for _, args := range invocations {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
