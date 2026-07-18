@@ -77,7 +77,7 @@ func (a *App) Doctor() []Check {
 
 	// Active marker consistency.
 	if st.Active != "" && st.IndexByUUID(st.Active) == -1 {
-		add("active marker", Warn, "points at unregistered uuid %s — it heals on the next discovery", st.Active)
+		add("active marker", Warn, "points at unregistered uuid %s — it heals on the next switch, or when a managed login is discovered", st.Active)
 	}
 
 	// Duplicates.

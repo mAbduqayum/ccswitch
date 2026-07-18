@@ -8,7 +8,7 @@ import (
 
 // TokenStatus classifies an account snapshot's refresh-token health for
 // display, never surfacing token values: "missing", "invalid", "unknown"
-// (no recorded expiry), "expired", "renew soon", or "ok". plan is the
+// (no recorded expiry), "expired", "renew-soon", or "ok". plan is the
 // subscription type when the snapshot is parseable.
 func (a *App) TokenStatus(uuid string) (status, plan string) {
 	raw, err := a.Store.ReadSnapshot(uuid)
