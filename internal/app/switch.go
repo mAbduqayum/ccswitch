@@ -121,6 +121,13 @@ func (a *App) Switch(target store.Account, force bool) (SwitchResult, error) {
 // identifyLive determines which registered account the live credentials
 // belong to: by the config profile when present, falling back to the active
 // marker. ok is false when the live login matches no registered account.
+//
+// The marker fallback is a heuristic — credentials carry no identity. A
+// foreign login paired with an unreadable config gets attributed to the
+// marked account, and when its tokens are newer they replace that account's
+// snapshot. Accepted residual: `claude /login` always rewrites the profile,
+// so this needs a separately corrupted config; refusing to snapshot here
+// would instead lose legitimate refreshes whenever the config is missing.
 func (a *App) identifyLive(st store.State) (store.Account, bool) {
 	_, profile, err := claude.ReadOAuthAccount(a.Env.ConfigPath())
 	if err == nil && profile.AccountUUID != "" {
