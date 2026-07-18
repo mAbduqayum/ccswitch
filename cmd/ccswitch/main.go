@@ -4,20 +4,38 @@ import (
 	"fmt"
 	"os"
 	"runtime/debug"
+
+	"github.com/mAbduqayum/ccswitch/internal/app"
+	"github.com/mAbduqayum/ccswitch/internal/claude"
+	"github.com/mAbduqayum/ccswitch/internal/cli"
 )
 
 // version is injected at release time via -ldflags "-X main.version=...".
 var version = ""
 
 func main() {
-	// Temporary stub until the cobra CLI lands: fail loudly on any
-	// arguments so pipelines (completions generation, Nix postInstall)
-	// can't silently package garbage.
-	if len(os.Args) > 1 {
-		fmt.Fprintf(os.Stderr, "ccswitch: CLI not implemented yet (got %q)\n", os.Args[1:])
+	env, err := claude.RealEnv()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "ccswitch:", err)
 		os.Exit(1)
 	}
-	fmt.Println("ccswitch", versionString())
+	opts := cli.Options{
+		Version: versionString(),
+		App:     app.New(env),
+		IO: cli.IO{
+			In:  os.Stdin,
+			Out: os.Stdout,
+			Err: os.Stderr,
+			// Prompts and the TUI need both directions to be a terminal.
+			IsTTY: isTTY(os.Stdin) && isTTY(os.Stdout),
+		},
+	}
+	os.Exit(cli.Execute(opts, os.Args[1:]))
+}
+
+func isTTY(f *os.File) bool {
+	info, err := f.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 func versionString() string {
