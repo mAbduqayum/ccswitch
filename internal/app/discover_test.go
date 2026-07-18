@@ -201,6 +201,31 @@ func TestAddCurrentConcurrentAddIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestAddCurrentConcurrentAddMatchesByEmail(t *testing.T) {
+	a := newTestApp(t)
+	writeLiveCreds(t, a, credsJSON("a", freshExpiry, refreshOK))
+	writeLiveConfig(t, a, profileJSON("uuid-new", "a@x.com"))
+	d, err := a.Discover()
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	// Another process registered the same email under an older uuid between
+	// Discover and AddCurrent — the recheck must match it like Discover would.
+	raced := store.Account{UUID: "uuid-old", Email: "a@x.com", AddedAt: testNow}
+	saveState(t, a, store.State{Active: "uuid-old", Accounts: []store.Account{raced}})
+
+	acct, err := a.AddCurrent(d)
+	if err != nil {
+		t.Fatalf("AddCurrent: %v", err)
+	}
+	if acct.UUID != "uuid-old" {
+		t.Errorf("got %+v, want the already-registered account back", acct)
+	}
+	if st := loadState(t, a); len(st.Accounts) != 1 {
+		t.Errorf("account duplicated: %+v", st.Accounts)
+	}
+}
+
 // syncBaseline builds a world where SyncKnown has nothing to do; each test
 // perturbs exactly one dimension.
 func syncBaseline(t *testing.T) (*App, []byte) {
@@ -339,6 +364,25 @@ func TestSyncKnown(t *testing.T) {
 		written, err := a.SyncKnown(Discovery{Status: Unknown})
 		if written || err != nil {
 			t.Errorf("got %v, %v; want false, nil", written, err)
+		}
+	})
+
+	t.Run("removed account is never resurrected", func(t *testing.T) {
+		a, _ := syncBaseline(t)
+		d := discoverKnown(t, a)
+		// Another process removes the account between Discover and SyncKnown.
+		if err := a.Remove("uuid-a"); err != nil {
+			t.Fatal(err)
+		}
+		if syncKnown(t, a, d) {
+			t.Error("SyncKnown wrote for a removed account")
+		}
+		st := loadState(t, a)
+		if st.IndexByUUID("uuid-a") != -1 || st.Active != "" {
+			t.Errorf("state = %+v, want the account gone and Active cleared", st)
+		}
+		if _, err := a.Store.ReadSnapshot("uuid-a"); err == nil {
+			t.Error("snapshot resurrected after removal")
 		}
 	})
 }

@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,6 +75,7 @@ func TestDoctorAccountChecks(t *testing.T) {
 		{"malformed snapshot", []byte("junk"), Fail, "malformed"},
 		{"missing tokens", []byte(`{"claudeAiOauth":{"expiresAt":1}}`), Fail, "missing token"},
 		{"expired refresh token", credsJSON("a", staleExpiry, refreshExpired), Fail, "expired"},
+		{"no refresh expiry", []byte(`{"claudeAiOauth":{"accessToken":"sk-test-x","refreshToken":"rt-test-x","expiresAt":1}}`), Warn, "health unknown"},
 		{"refresh token expiring soon", credsJSON("a", staleExpiry, refreshSoon), Warn, "expires in"},
 		{"healthy snapshot", credsJSON("a", staleExpiry, refreshOK), OK, "valid for 30d"},
 	}
@@ -190,6 +192,27 @@ func TestDoctorUnregisteredLiveAccount(t *testing.T) {
 	c := findCheck(t, a.Doctor(), "registration")
 	if c.Status != Warn || !strings.Contains(c.Detail, "s@x.com") {
 		t.Errorf("registration = %+v, want Warn naming the account", c)
+	}
+}
+
+// TestDoctorNeverLeaksTokens sweeps the full doctor output — text and JSON —
+// for the sentinel token prefixes that every fixture in this world carries.
+func TestDoctorNeverLeaksTokens(t *testing.T) {
+	w := newSwitchWorld(t)
+	// Make one snapshot malformed while still containing tokens, so even
+	// error details are swept.
+	writeSnapshot(t, w.a, "uuid-b", append(credsJSON("b", freshExpiry, refreshOK), '{'))
+
+	checks := w.a.Doctor()
+	out, err := json.Marshal(checks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blob := string(out) + fmt.Sprintf("%+v", checks)
+	for _, needle := range []string{"sk-test-", "rt-test-"} {
+		if strings.Contains(blob, needle) {
+			t.Errorf("doctor output leaks a token value (found %q)", needle)
+		}
 	}
 }
 

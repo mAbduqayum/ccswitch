@@ -27,11 +27,13 @@ const (
 
 // Discovery captures everything learned about the live login. It is
 // produced by Discover (read-only) and consumed by AddCurrent/SyncKnown.
+// The raw fields hold live credential bytes and are excluded from JSON so
+// no caller can marshal them by accident.
 type Discovery struct {
 	Status     DiscoveryStatus
-	RawCreds   []byte
+	RawCreds   []byte `json:"-"`
 	Meta       claude.CredentialMeta
-	RawProfile json.RawMessage
+	RawProfile json.RawMessage `json:"-"`
 	Profile    claude.Profile
 	Account    store.Account // set when Status == Known
 }
@@ -92,8 +94,12 @@ func (a *App) AddCurrent(d Discovery) (store.Account, error) {
 	if err != nil {
 		return store.Account{}, err
 	}
-	// Another process may have added it between Discover and Lock.
+	// Another process may have added it between Discover and Lock — match
+	// the same way Discover does, by uuid then by email.
 	if idx := st.IndexByUUID(d.Profile.AccountUUID); idx != -1 {
+		return st.Accounts[idx], nil
+	}
+	if idx := st.IndexByEmail(d.Profile.EmailAddress); idx != -1 {
 		return st.Accounts[idx], nil
 	}
 	acct := store.Account{
@@ -115,6 +121,53 @@ func (a *App) AddCurrent(d Discovery) (store.Account, error) {
 	return acct, nil
 }
 
+// snapshotNeedsRefresh reports whether live tokens should replace the
+// stored snapshot for uuid: yes when the snapshot is missing or corrupt, or
+// when the live tokens are strictly newer — an older live file must never
+// clobber a fresher snapshot, whose refresh token may be the only valid one.
+func (a *App) snapshotNeedsRefresh(uuid string, live claude.CredentialMeta) (bool, error) {
+	snap, err := a.Store.ReadSnapshot(uuid)
+	if errors.Is(err, fs.ErrNotExist) {
+		return true, nil // registered but snapshotless — heal
+	}
+	if err != nil {
+		return false, err
+	}
+	snapMeta, perr := claude.ParseCredentials(snap)
+	return perr != nil || live.ExpiresAt > snapMeta.ExpiresAt, nil //nolint:nilerr // a corrupt snapshot is simply replaced
+}
+
+// syncNeeds lists what SyncKnown has to write.
+type syncNeeds struct{ creds, profile, active, email bool }
+
+func (n syncNeeds) any() bool { return n.creds || n.profile || n.active || n.email }
+
+// computeSyncNeeds decides what SyncKnown must write, judged against the
+// current on-disk state. An account removed since discovery yields no needs
+// at all — sync must never resurrect it.
+func (a *App) computeSyncNeeds(d Discovery) (syncNeeds, store.State, error) {
+	var n syncNeeds
+	st, err := a.Store.LoadState()
+	if err != nil {
+		return n, st, err
+	}
+	idx := st.IndexByUUID(d.Account.UUID)
+	if idx == -1 {
+		return n, st, nil
+	}
+	if n.creds, err = a.snapshotNeedsRefresh(d.Account.UUID, d.Meta); err != nil {
+		return n, st, err
+	}
+	stored, err := a.Store.ReadProfile(d.Account.UUID)
+	if err != nil {
+		return n, st, err
+	}
+	n.profile = d.RawProfile != nil && !bytes.Equal(d.RawProfile, stored)
+	n.active = st.Active != d.Account.UUID
+	n.email = d.Profile.EmailAddress != "" && st.Accounts[idx].Email != d.Profile.EmailAddress
+	return n, st, nil
+}
+
 // SyncKnown reconciles the store with a known live login: strictly newer
 // live tokens replace the stored snapshot (so refresh tokens never rot),
 // profile drift is captured, the stored email follows the profile, and the
@@ -124,38 +177,10 @@ func (a *App) SyncKnown(d Discovery) (bool, error) {
 	if d.Status != Known {
 		return false, nil
 	}
-	uuid := d.Account.UUID
-
-	needCreds := false
-	snap, err := a.Store.ReadSnapshot(uuid)
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-		needCreds = true // registered but snapshotless — heal
-	case err != nil:
+	// Unlocked fast path: the common nothing-drifted case takes no lock.
+	need, _, err := a.computeSyncNeeds(d)
+	if err != nil || !need.any() {
 		return false, err
-	default:
-		snapMeta, perr := claude.ParseCredentials(snap)
-		// A corrupt snapshot is replaced; otherwise only strictly newer
-		// live tokens win, so an older live file never clobbers a fresher
-		// snapshot.
-		needCreds = perr != nil || d.Meta.ExpiresAt > snapMeta.ExpiresAt
-	}
-
-	storedProfile, err := a.Store.ReadProfile(uuid)
-	if err != nil {
-		return false, err
-	}
-	needProfile := d.RawProfile != nil && !bytes.Equal(d.RawProfile, storedProfile)
-
-	st, err := a.Store.LoadState()
-	if err != nil {
-		return false, err
-	}
-	needActive := st.Active != uuid
-	needEmail := d.Profile.EmailAddress != "" && d.Account.Email != d.Profile.EmailAddress
-
-	if !needCreds && !needProfile && !needActive && !needEmail {
-		return false, nil
 	}
 
 	unlock, err := a.Store.Lock()
@@ -163,23 +188,32 @@ func (a *App) SyncKnown(d Discovery) (bool, error) {
 		return false, err
 	}
 	defer unlock()
-	st, err = a.Store.LoadState() // reload under the lock
-	if err != nil {
+	// Recompute under the lock: since the unlocked look, another process may
+	// have written a fresher snapshot (invalidating our decision to refresh
+	// it) or removed the account entirely.
+	need, st, err := a.computeSyncNeeds(d)
+	if err != nil || !need.any() {
 		return false, err
 	}
-	if needCreds {
+	uuid := d.Account.UUID
+	if need.creds {
 		if err := a.Store.WriteSnapshot(uuid, d.RawCreds); err != nil {
 			return false, err
 		}
 	}
-	if needProfile {
+	if need.profile {
 		if err := a.Store.WriteProfile(uuid, d.RawProfile); err != nil {
 			return false, err
 		}
 	}
-	if idx := st.IndexByUUID(uuid); idx != -1 && needEmail {
-		st.Accounts[idx].Email = d.Profile.EmailAddress
+	if need.email {
+		st.Accounts[st.IndexByUUID(uuid)].Email = d.Profile.EmailAddress
 	}
-	st.Active = uuid
-	return true, a.Store.SaveState(st)
+	if need.active {
+		st.Active = uuid
+	}
+	if need.email || need.active {
+		return true, a.Store.SaveState(st)
+	}
+	return true, nil
 }

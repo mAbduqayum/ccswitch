@@ -15,6 +15,7 @@ import (
 
 var (
 	testNow        = time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	olderExpiry    = testNow.Add(30 * time.Minute)
 	staleExpiry    = testNow.Add(1 * time.Hour)
 	freshExpiry    = testNow.Add(4 * time.Hour)
 	refreshOK      = testNow.Add(30 * 24 * time.Hour)

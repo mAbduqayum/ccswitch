@@ -56,6 +56,10 @@ func (a *App) Switch(target store.Account, force bool) (SwitchResult, error) {
 	case err != nil:
 		return res, err
 	default:
+		liveMeta, perr := claude.ParseCredentials(liveRaw)
+		if perr != nil {
+			return res, fmt.Errorf("refusing to switch: live credentials at %s are malformed (%w) — run `claude /login` to repair them first", a.Creds.Location(), perr)
+		}
 		cur, ok := a.identifyLive(st)
 		switch {
 		case ok && cur.UUID == target.UUID:
@@ -64,8 +68,17 @@ func (a *App) Switch(target store.Account, force bool) (SwitchResult, error) {
 			snap = liveRaw
 			res.From = cur
 		case ok:
-			if err := a.Store.WriteSnapshot(cur.UUID, liveRaw); err != nil {
+			// identifyLive's active-marker fallback can misattribute a
+			// foreign login, so only overwrite the slot when the live
+			// tokens are strictly newer than the stored snapshot.
+			refresh, err := a.snapshotNeedsRefresh(cur.UUID, liveMeta)
+			if err != nil {
 				return res, err
+			}
+			if refresh {
+				if err := a.Store.WriteSnapshot(cur.UUID, liveRaw); err != nil {
+					return res, err
+				}
 			}
 			res.From = cur
 		case force:

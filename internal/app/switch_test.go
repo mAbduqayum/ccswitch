@@ -230,6 +230,50 @@ func TestSwitchIdentifiesLiveByActiveMarker(t *testing.T) {
 	}
 }
 
+// TestSwitchMarkerFallbackKeepsFresherSnapshot: when identifyLive falls back
+// to the active marker, the live file may belong to someone else entirely —
+// live tokens older than the marked account's snapshot must not overwrite it.
+func TestSwitchMarkerFallbackKeepsFresherSnapshot(t *testing.T) {
+	w := newSwitchWorld(t)
+	if err := os.Remove(w.a.Env.ConfigPath()); err != nil {
+		t.Fatal(err)
+	}
+	writeLiveCreds(t, w.a, credsJSON("foreign", olderExpiry, refreshOK))
+
+	res, err := w.a.Switch(w.acctB, false)
+	if err != nil {
+		t.Fatalf("Switch: %v", err)
+	}
+	if got := readSnapshot(t, w.a, "uuid-a"); !bytes.Equal(got, w.snapA) {
+		t.Error("older live tokens clobbered A's fresher snapshot")
+	}
+	if got := readLiveCreds(t, w.a); !bytes.Equal(got, w.snapB) {
+		t.Error("live credentials are not B's snapshot")
+	}
+	if res.From.UUID != "uuid-a" {
+		t.Errorf("From = %q, want uuid-a via the active marker", res.From.UUID)
+	}
+}
+
+func TestSwitchMalformedLiveCredsAborts(t *testing.T) {
+	w := newSwitchWorld(t)
+	writeLiveCreds(t, w.a, []byte("junk"))
+	_, err := w.a.Switch(w.acctB, false)
+	if err == nil || !strings.Contains(err.Error(), "malformed") {
+		t.Fatalf("error = %v, want a malformed-credentials abort", err)
+	}
+	// Zero side effects: nothing restored, nothing snapshotted, marker intact.
+	if got := readLiveCreds(t, w.a); !bytes.Equal(got, []byte("junk")) {
+		t.Error("live credentials changed despite the abort")
+	}
+	if got := readSnapshot(t, w.a, "uuid-a"); !bytes.Equal(got, w.snapA) {
+		t.Error("A's snapshot changed despite the abort")
+	}
+	if st := loadState(t, w.a); st.Active != "uuid-a" {
+		t.Errorf("Active = %q, want untouched uuid-a", st.Active)
+	}
+}
+
 func TestSwitchWithoutStoredProfileSkipsPatch(t *testing.T) {
 	w := newSwitchWorld(t)
 	if err := os.Remove(filepath.Join(w.a.Store.Dir(), "accounts", "uuid-b", "profile.json")); err != nil {

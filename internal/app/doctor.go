@@ -117,8 +117,10 @@ func (a *App) Doctor() []Check {
 			continue
 		}
 		switch left := meta.RefreshExpiry().Sub(now); {
+		case meta.RefreshTokenExpiresAt == 0:
+			add(name, Warn, "snapshot has no refresh-token expiry — health unknown")
 		case left <= 0:
-			add(name, Fail, "refresh token expired %s ago — log in as it again", (-left).Round(time.Hour))
+			add(name, Fail, "refresh token expired %s ago — log in as it again", (-left).Round(time.Minute))
 		case left < 7*24*time.Hour:
 			add(name, Warn, "refresh token expires in %s — switch to it soon so it renews", left.Round(time.Hour))
 		default:
