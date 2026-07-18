@@ -126,7 +126,7 @@ func (a *App) Doctor() []Check {
 			add(name, Warn, "snapshot has no refresh-token expiry — health unknown")
 		case left <= 0:
 			add(name, Fail, "refresh token expired %s ago — log in as it again", (-left).Round(time.Minute))
-		case left < 7*24*time.Hour:
+		case left < renewSoonWindow:
 			add(name, Warn, "refresh token expires in %s — switch to it soon so it renews", left.Round(time.Hour))
 		default:
 			add(name, OK, "snapshot healthy, refresh token valid for %dd", int(left.Hours()/24))

@@ -183,8 +183,6 @@ func (m Model) renameCmd(target store.Account, alias string) tea.Cmd {
 	}
 }
 
-// Update
-
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -339,12 +337,8 @@ func (m *Model) setRows(rows []accountRow) {
 		})
 	}
 	m.table.SetRows(tableRows)
-	height := len(rows)
-	if height < 1 {
-		height = 1
-	}
 	// SetHeight subtracts the header (title line + border) internally.
-	m.table.SetHeight(height + tableHeaderHeight)
+	m.table.SetHeight(max(len(rows), 1) + tableHeaderHeight)
 	if m.table.Cursor() >= len(rows) && len(rows) > 0 {
 		m.table.SetCursor(len(rows) - 1)
 	}
@@ -357,8 +351,6 @@ func (m Model) selected() (accountRow, bool) {
 	}
 	return m.rows[idx], true
 }
-
-// View
 
 func (m Model) View() string {
 	var b strings.Builder

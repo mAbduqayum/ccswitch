@@ -6,6 +6,10 @@ import (
 	"github.com/mAbduqayum/ccswitch/internal/claude"
 )
 
+// renewSoonWindow is how close to refresh-token expiry an account gets
+// flagged for renewal — switching to it lets Claude Code rotate the token.
+const renewSoonWindow = 7 * 24 * time.Hour
+
 // TokenStatus classifies an account snapshot's refresh-token health for
 // display, never surfacing token values: "missing", "invalid", "unknown"
 // (no recorded expiry), "expired", "renew-soon", or "ok". plan is the
@@ -27,7 +31,7 @@ func (a *App) TokenStatus(uuid string) (status, plan string) {
 		return "unknown", meta.SubscriptionType
 	case left <= 0:
 		return "expired", meta.SubscriptionType
-	case left < 7*24*time.Hour:
+	case left < renewSoonWindow:
 		return "renew-soon", meta.SubscriptionType
 	default:
 		return "ok", meta.SubscriptionType
