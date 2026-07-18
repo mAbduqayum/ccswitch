@@ -62,8 +62,6 @@
             gopls
             golangci-lint
             gofumpt
-            delve
-            gh
             goreleaser
           ];
         };
