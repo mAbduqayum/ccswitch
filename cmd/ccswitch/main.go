@@ -8,6 +8,7 @@ import (
 	"github.com/mAbduqayum/ccswitch/internal/app"
 	"github.com/mAbduqayum/ccswitch/internal/claude"
 	"github.com/mAbduqayum/ccswitch/internal/cli"
+	"github.com/mAbduqayum/ccswitch/internal/tui"
 )
 
 // version is injected at release time via -ldflags "-X main.version=...".
@@ -22,6 +23,7 @@ func main() {
 	opts := cli.Options{
 		Version: versionString(),
 		App:     app.New(env),
+		RunTUI:  tui.Run,
 		IO: cli.IO{
 			In:  os.Stdin,
 			Out: os.Stdout,

@@ -24,7 +24,7 @@
 
           # After go.mod/go.sum change: set to nixpkgs.lib.fakeHash, run
           # `nix build`, and paste the real hash from the mismatch error.
-          vendorHash = "sha256-7K17JaXFsjf163g5PXCb5ng2gYdotnZ2IDKk8KFjNj0=";
+          vendorHash = "sha256-AdEwv+3sIgx60XAgHhG8Kmc0Aef74eoRCaqX1fXSc8Q=";
 
           subPackages = [ "cmd/ccswitch" ];
 

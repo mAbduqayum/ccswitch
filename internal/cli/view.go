@@ -5,7 +5,6 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/mAbduqayum/ccswitch/internal/claude"
 	"github.com/mAbduqayum/ccswitch/internal/store"
 )
 
@@ -33,7 +32,7 @@ type statusView struct {
 func (r *runner) accountViews(st store.State) []accountView {
 	views := make([]accountView, 0, len(st.Accounts))
 	for i, acc := range st.Accounts {
-		status, plan := r.tokenStatus(acc.UUID)
+		status, plan := r.app.TokenStatus(acc.UUID)
 		views = append(views, accountView{
 			Number:      i + 1,
 			UUID:        acc.UUID,
@@ -46,32 +45,6 @@ func (r *runner) accountViews(st store.State) []accountView {
 		})
 	}
 	return views
-}
-
-// tokenStatus classifies a snapshot's refresh-token health for display,
-// without ever surfacing the tokens themselves.
-func (r *runner) tokenStatus(uuid string) (status, plan string) {
-	raw, err := r.app.Store.ReadSnapshot(uuid)
-	if err != nil {
-		return "missing", ""
-	}
-	meta, err := claude.ParseCredentials(raw)
-	if err != nil {
-		return "invalid", ""
-	}
-	if access, refresh := claude.HasTokens(raw); !access || !refresh {
-		return "invalid", meta.SubscriptionType
-	}
-	switch left := meta.RefreshExpiry().Sub(r.app.Now()); {
-	case meta.RefreshTokenExpiresAt == 0:
-		return "unknown", meta.SubscriptionType
-	case left <= 0:
-		return "expired", meta.SubscriptionType
-	case left < 7*24*time.Hour:
-		return "renew soon", meta.SubscriptionType
-	default:
-		return "ok", meta.SubscriptionType
-	}
 }
 
 func (r *runner) list(asJSON bool) error {
