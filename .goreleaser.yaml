@@ -1,5 +1,6 @@
 # GoReleaser config — https://goreleaser.com
-# Cut a release by pushing a tag: `git tag v1.2.3 && git push origin v1.2.3`.
+# Releases are cut by merging the release-please PR; that tags the merge
+# commit and the release-please workflow runs GoReleaser against it.
 version: 2
 
 project_name: ccswitch
@@ -55,3 +56,6 @@ changelog:
 
 release:
   draft: false
+  # release-please creates the GitHub release first, with link-heavy notes;
+  # replace overwrites its body with the grouped hash-free changelog above.
+  mode: replace
