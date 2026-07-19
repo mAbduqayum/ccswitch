@@ -49,10 +49,14 @@ changelog:
     - title: Other
       order: 999
   filters:
+    # Scope-tolerant: release-please's own merge commit is `chore(main): ...`
+    # and must not land under "Other".
     exclude:
-      - "^docs:"
-      - "^test:"
-      - "^chore:"
+      - '^docs(\(.+\))?:'
+      - '^test(\(.+\))?:'
+      - '^chore(\(.+\))?:'
+      - '^ci(\(.+\))?:'
+      - "^Merge "
 
 release:
   draft: false

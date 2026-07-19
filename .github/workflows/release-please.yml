@@ -4,9 +4,15 @@ on:
   push:
     branches: ["main"]
 
+# issues: write lets the bot create its autorelease tracking labels.
 permissions:
   contents: write
+  issues: write
   pull-requests: write
+
+# Never cancel-in-progress: killing a run mid-tag/release is worse than queuing.
+concurrency:
+  group: release-please
 
 jobs:
   release-please:
