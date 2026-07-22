@@ -17,7 +17,6 @@ type SwitchResult struct {
 	From           store.Account // zero value when nothing live was identified
 	To             store.Account
 	ProfilePatched bool
-	ClaudeRunning  bool
 	Warnings       []string
 }
 
@@ -116,10 +115,6 @@ func (a *App) Switch(target store.Account, force bool) (SwitchResult, error) {
 		return res, err
 	}
 
-	// (5) A running `claude` holds the old tokens in memory.
-	if a.Pgrep != nil && a.Pgrep() {
-		res.ClaudeRunning = true
-	}
 	return res, nil
 }
 

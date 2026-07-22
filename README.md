@@ -38,8 +38,7 @@ shell completions included are on the
    `ccswitch` — it notices the login and offers to add it.
 2. Log into your second account (`claude /logout`, `claude /login`), run
    `ccswitch` again, accept the prompt.
-3. From now on `ccswitch switch` toggles between them. Restart any running
-   `claude` session afterwards — it holds the old tokens in memory.
+3. From now on `ccswitch switch` toggles between them.
 
 ## Usage
 

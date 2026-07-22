@@ -236,9 +236,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.loadCmd()
 		}
 		notes := append([]string{"switched to " + msg.res.To.Email}, msg.res.Warnings...)
-		if msg.res.ClaudeRunning {
-			notes = append(notes, "restart the running claude session")
-		}
 		m.status = strings.Join(notes, " · ")
 		return m, m.loadCmd()
 

@@ -124,9 +124,6 @@ func (r *runner) switchTo(args []string, force bool) error {
 	} else {
 		fmt.Fprintf(r.io.Out, "switched to %s\n", label)
 	}
-	if res.ClaudeRunning {
-		fmt.Fprintln(r.io.Err, "note: a claude process is running — restart it to pick up the new account")
-	}
 	return nil
 }
 

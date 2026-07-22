@@ -34,7 +34,6 @@ func newTestApp(t *testing.T) *App {
 		Env:   env,
 		Store: store.New(env.StoreDir()),
 		Now:   func() time.Time { return testNow },
-		Pgrep: func() bool { return false },
 	}
 }
 

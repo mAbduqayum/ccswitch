@@ -5,7 +5,6 @@ package app
 import (
 	"errors"
 	"fmt"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -19,7 +18,6 @@ type App struct {
 	Env   claude.Env
 	Store *store.Store
 	Now   func() time.Time
-	Pgrep func() bool // best-effort: is a `claude` process running?
 }
 
 // New wires an App against the real environment.
@@ -29,12 +27,7 @@ func New(env claude.Env) *App {
 		Env:   env,
 		Store: store.New(env.StoreDir()),
 		Now:   time.Now,
-		Pgrep: claudeRunning,
 	}
-}
-
-func claudeRunning() bool {
-	return exec.Command("pgrep", "-x", "claude").Run() == nil
 }
 
 // RotateTarget picks the account after Active in rotation order, wrapping

@@ -33,7 +33,6 @@ func newTestApp(t *testing.T) *app.App {
 		Env:   env,
 		Store: store.New(env.StoreDir()),
 		Now:   func() time.Time { return testNow },
-		Pgrep: func() bool { return false },
 	}
 }
 
@@ -483,16 +482,6 @@ func TestSwitchForce(t *testing.T) {
 			t.Errorf("stderr = %q, want a discard warning", stderr)
 		}
 	})
-}
-
-func TestSwitchWarnsAboutRunningClaude(t *testing.T) {
-	a := newTestApp(t)
-	seedTwoAccounts(t, a)
-	a.Pgrep = func() bool { return true }
-	code, _, stderr := run(t, a, false, "", "switch")
-	if code != 0 || !strings.Contains(stderr, "restart") {
-		t.Errorf("exit = %d, stderr = %q", code, stderr)
-	}
 }
 
 func TestTokenStatusClassifications(t *testing.T) {

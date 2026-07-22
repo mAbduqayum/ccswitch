@@ -70,8 +70,8 @@ func TestSwitchSnapshotsLiveBeforeRestore(t *testing.T) {
 	if !res.ProfilePatched {
 		t.Error("profile was not patched")
 	}
-	if res.ClaudeRunning || len(res.Warnings) != 0 {
-		t.Errorf("unexpected flags: %+v", res)
+	if len(res.Warnings) != 0 {
+		t.Errorf("unexpected warnings: %+v", res.Warnings)
 	}
 
 	info, err := os.Stat(w.a.Env.CredentialsPath())
@@ -317,18 +317,6 @@ func TestSwitchWithoutStoredProfileSkipsPatch(t *testing.T) {
 	}
 	if !bytes.Contains(data, []byte("a@x.com")) {
 		t.Error("config was rewritten although no profile was available")
-	}
-}
-
-func TestSwitchReportsRunningClaude(t *testing.T) {
-	w := newSwitchWorld(t)
-	w.a.Pgrep = func() bool { return true }
-	res, err := w.a.Switch(w.acctB, false)
-	if err != nil {
-		t.Fatalf("Switch: %v", err)
-	}
-	if !res.ClaudeRunning {
-		t.Error("ClaudeRunning = false, want true")
 	}
 }
 
