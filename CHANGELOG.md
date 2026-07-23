@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/mAbduqayum/ccswitch/compare/v0.3.0...v0.4.0) (2026-07-23)
+
+
+### Features
+
+* add warm command to refresh all accounts' tokens ([#11](https://github.com/mAbduqayum/ccswitch/issues/11)) ([940b79b](https://github.com/mAbduqayum/ccswitch/commit/940b79bff065ceb577976057584fd51b8c7c3ee5))
+
 ## [0.3.0](https://github.com/mAbduqayum/ccswitch/compare/v0.2.0...v0.3.0) (2026-07-23)
 
 
