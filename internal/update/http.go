@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"time"
 )
@@ -19,16 +20,27 @@ type httpReleaser struct {
 	apiURL string
 }
 
-// NewHTTPReleaser builds a Releaser that talks to GitHub Releases.
+// NewHTTPReleaser builds a Releaser that talks to GitHub Releases. It bounds
+// the connect, TLS, and response-header phases rather than the whole exchange:
+// a blanket client timeout would guillotine a large download on a slow link
+// (the release archive is a few megabytes). Overall cancellation rides on the
+// caller's context.
 func NewHTTPReleaser() Releaser {
 	return &httpReleaser{
-		client: &http.Client{Timeout: 60 * time.Second},
+		client: &http.Client{
+			Transport: &http.Transport{
+				Proxy:                 http.ProxyFromEnvironment,
+				DialContext:           (&net.Dialer{Timeout: 30 * time.Second}).DialContext,
+				TLSHandshakeTimeout:   30 * time.Second,
+				ResponseHeaderTimeout: 30 * time.Second,
+			},
+		},
 		apiURL: latestReleaseURL,
 	}
 }
 
 func (h *httpReleaser) Latest(ctx context.Context) (Release, error) {
-	body, err := h.get(ctx, h.apiURL)
+	body, err := h.get(ctx, h.apiURL, nil)
 	if err != nil {
 		return Release{}, err
 	}
@@ -49,11 +61,11 @@ func (h *httpReleaser) Latest(ctx context.Context) (Release, error) {
 	return rel, nil
 }
 
-func (h *httpReleaser) Fetch(ctx context.Context, url string) ([]byte, error) {
-	return h.get(ctx, url)
+func (h *httpReleaser) Fetch(ctx context.Context, url string, progress func(done, total int64)) ([]byte, error) {
+	return h.get(ctx, url, progress)
 }
 
-func (h *httpReleaser) get(ctx context.Context, url string) ([]byte, error) {
+func (h *httpReleaser) get(ctx context.Context, url string, progress func(done, total int64)) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -68,5 +80,31 @@ func (h *httpReleaser) get(ctx context.Context, url string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("GET %s: %s", url, resp.Status)
 	}
-	return io.ReadAll(io.LimitReader(resp.Body, maxDownloadSize))
+	reader := io.LimitReader(resp.Body, maxDownloadSize)
+	if progress != nil {
+		reader = &progressReader{r: reader, total: resp.ContentLength, report: progress}
+	}
+	return io.ReadAll(reader)
+}
+
+// progressReader reports cumulative bytes read to a callback as a download
+// streams. total is the Content-Length (0 when the server didn't send one).
+type progressReader struct {
+	r      io.Reader
+	total  int64
+	done   int64
+	report func(done, total int64)
+}
+
+func (p *progressReader) Read(b []byte) (int, error) {
+	n, err := p.r.Read(b)
+	if n > 0 {
+		p.done += int64(n)
+		total := p.total
+		if total < 0 {
+			total = 0
+		}
+		p.report(p.done, total)
+	}
+	return n, err
 }

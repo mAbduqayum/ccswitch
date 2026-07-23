@@ -302,7 +302,12 @@ func (r *runner) runUpdate(ctx context.Context, checkOnly, yes bool) error {
 		}
 	}
 
-	if err := r.updater.Apply(ctx, rel, target.Dest); err != nil {
+	fmt.Fprintf(r.io.Err, "downloading ccswitch %s (%s/%s)…\n", vc.Latest, r.updater.GOOS, r.updater.GOARCH)
+	report, finish := r.downloadProgress()
+	r.updater.OnProgress = report
+	err = r.updater.Apply(ctx, rel, target.Dest)
+	finish() // close off the progress line before anything else prints
+	if err != nil {
 		return err
 	}
 	fmt.Fprintf(r.io.Out, "updated ccswitch %s → %s\n", vc.Current, vc.Latest)
@@ -313,6 +318,56 @@ func (r *runner) runUpdate(ctx context.Context, checkOnly, yes bool) error {
 		}
 	}
 	return nil
+}
+
+// downloadProgress returns a callback that renders a live download bar and a
+// finish func that terminates the bar's line. On a non-TTY (piped) run the
+// callback is nil — the "downloading…" notice is the only signal — and finish
+// is a no-op. finish only emits a newline if the bar actually drew, so an
+// instant download leaves no stray blank line.
+func (r *runner) downloadProgress() (report func(done, total int64), finish func()) {
+	if !r.io.IsTTY {
+		return nil, func() {}
+	}
+	var drew bool
+	lastPct, lastBytes := -1, int64(0)
+	report = func(done, total int64) {
+		drew = true
+		if total > 0 {
+			pct := int(done * 100 / total)
+			if pct == lastPct {
+				return // redraw only when the whole percent changes
+			}
+			lastPct = pct
+			fmt.Fprintf(r.io.Err, "\r  %s / %s  %3d%%   ", humanBytes(done), humanBytes(total), pct)
+			return
+		}
+		if done-lastBytes < 256<<10 {
+			return // unknown total: redraw every ~256 KiB
+		}
+		lastBytes = done
+		fmt.Fprintf(r.io.Err, "\r  %s downloaded   ", humanBytes(done))
+	}
+	finish = func() {
+		if drew {
+			fmt.Fprintln(r.io.Err)
+		}
+	}
+	return report, finish
+}
+
+// humanBytes formats a byte count with a binary (KiB/MiB) unit.
+func humanBytes(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := int64(unit), 0
+	for x := n / unit; x >= unit; x /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
 }
 
 func (r *runner) completionsCmd() *cobra.Command {
