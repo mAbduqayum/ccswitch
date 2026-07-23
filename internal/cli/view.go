@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"text/tabwriter"
 	"time"
@@ -27,6 +28,16 @@ type statusView struct {
 	Credentials string       `json:"credentials"`
 	Config      string       `json:"config"`
 	Store       string       `json:"store"`
+}
+
+// warmView is one account's warm outcome. Identity plus a plain error string —
+// nothing here is derived from a token value.
+type warmView struct {
+	UUID  string `json:"uuid"`
+	Email string `json:"email"`
+	Alias string `json:"alias,omitempty"`
+	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
 }
 
 func (r *runner) accountViews(st store.State) []accountView {
@@ -111,4 +122,56 @@ func (r *runner) status(asJSON bool) error {
 	fmt.Fprintf(w, "config:\t%s\n", view.Config)
 	fmt.Fprintf(w, "store:\t%s\n", view.Store)
 	return w.Flush()
+}
+
+func (r *runner) warm(ctx context.Context, model, prompt string, timeout time.Duration, asJSON bool) error {
+	report, err := r.app.Warm(ctx, model, prompt, timeout)
+	if err != nil {
+		return err
+	}
+	views := make([]warmView, 0, len(report.Results))
+	for _, res := range report.Results {
+		v := warmView{
+			UUID:  res.Account.UUID,
+			Email: res.Account.Email,
+			Alias: res.Account.Alias,
+			OK:    res.Err == nil,
+		}
+		if res.Err != nil {
+			v.Error = res.Err.Error()
+		}
+		views = append(views, v)
+	}
+
+	if asJSON {
+		if err := writeJSON(r.io.Out, views); err != nil {
+			return err
+		}
+	} else {
+		w := tabwriter.NewWriter(r.io.Out, 2, 0, 2, ' ', 0)
+		fmt.Fprintln(w, "ACCOUNT\tRESULT")
+		for _, v := range views {
+			label := v.Email
+			if v.Alias != "" {
+				label = fmt.Sprintf("%s (%s)", v.Email, v.Alias)
+			}
+			result := "ok"
+			if !v.OK {
+				result = "failed: " + v.Error
+			}
+			fmt.Fprintf(w, "%s\t%s\n", label, result)
+		}
+		if err := w.Flush(); err != nil {
+			return err
+		}
+	}
+	for _, warn := range report.Warnings {
+		fmt.Fprintln(r.io.Err, "warning:", warn)
+	}
+	// Non-zero exit so a timer or cron job notices; the table above already
+	// says which accounts and why.
+	if n := report.Failed(); n > 0 {
+		return fmt.Errorf("%d of %d accounts failed to warm", n, len(report.Results))
+	}
+	return nil
 }

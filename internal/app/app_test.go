@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -34,6 +35,8 @@ func newTestApp(t *testing.T) *App {
 		Env:   env,
 		Store: store.New(env.StoreDir()),
 		Now:   func() time.Time { return testNow },
+		// Stands in for the claude binary: tests must never spawn a process.
+		Warmer: func(context.Context, string, string) error { return nil },
 	}
 }
 

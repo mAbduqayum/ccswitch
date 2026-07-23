@@ -67,6 +67,7 @@ ccswitch switch work         # by alias, email, list number, or uuid
 ccswitch alias 2 personal    # name an account ("" clears)
 ccswitch remove personal     # forget an account (-y skips the prompt)
 ccswitch doctor              # health checks; exit 1 on failures
+ccswitch warm                # run claude once as each account; exit 1 on failures
 ccswitch update              # self-update to the latest release
 ccswitch update --check      # report if an update is available, install nothing
 ccswitch completions zsh     # bash | zsh | fish
@@ -78,6 +79,28 @@ it. It downloads the matching release archive, verifies its SHA-256 against
 installed by a package manager (Nix, Homebrew) the binary can't be overwritten
 in place; `update` asks first and, if you agree, installs a self-managed copy
 to `~/.local/bin/ccswitch`.
+
+## Keeping idle accounts alive
+
+An account you don't switch to for months can have its refresh token expire
+from disuse. `ccswitch warm` exercises every account in turn — switching to
+it and running `claude --model haiku --print hi` once — so Claude Code
+refreshes each account's credentials and ccswitch banks the result:
+
+```sh
+ccswitch warm                       # every account, haiku, 30s each
+ccswitch warm --timeout 2m --json   # slower links, machine-readable report
+```
+
+ccswitch still makes no network call itself; the `claude` binary does. An
+account that fails (offline, needs a re-login) is reported without stopping
+the rest, the exit status is non-zero if any failed, and the account that was
+active is restored at the end.
+
+Scheduling is left to the OS — a systemd timer or a cron entry such as
+`0 4 * * 0 ccswitch warm` is enough. One caveat: warm swaps the live
+credential file from account to account as it runs, so don't run it while an
+interactive `claude` session is open under a different account.
 
 ## Auto-discovery
 

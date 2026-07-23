@@ -2,7 +2,9 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -33,6 +35,8 @@ func newTestApp(t *testing.T) *app.App {
 		Env:   env,
 		Store: store.New(env.StoreDir()),
 		Now:   func() time.Time { return testNow },
+		// Stands in for the claude binary: warm must never spawn a process.
+		Warmer: func(context.Context, string, string) error { return nil },
 	}
 }
 
@@ -662,6 +666,8 @@ func TestNoOutputLeaksTokens(t *testing.T) {
 		{"switch", "nope"},
 		{"remove", "--yes", "b@x.com"},
 		{"alias", "b@x.com", "personal"},
+		{"warm"},
+		{"warm", "--json"},
 	}
 	for _, args := range invocations {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
@@ -677,5 +683,159 @@ func TestNoOutputLeaksTokens(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// warmApp seeds two accounts with a@x.com live, so warm has a registered
+// login to start from and return to.
+func warmApp(t *testing.T) *app.App {
+	t.Helper()
+	a := newTestApp(t)
+	seedTwoAccounts(t, a)
+	writeLiveCreds(t, a, credsJSON("a", staleExpiry, refreshOK))
+	writeLiveConfig(t, a, profileJSON("uuid-a", "a@x.com"))
+	return a
+}
+
+func TestWarmReportsEveryAccount(t *testing.T) {
+	a := warmApp(t)
+	var models, prompts []string
+	a.Warmer = func(_ context.Context, model, prompt string) error {
+		models = append(models, model)
+		prompts = append(prompts, prompt)
+		return nil
+	}
+
+	code, out, stderr := run(t, a, false, "", "warm")
+	if code != 0 {
+		t.Fatalf("exit = %d, out = %q, stderr = %q", code, out, stderr)
+	}
+	for _, want := range []string{"a@x.com (work)", "b@x.com", "ok"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+	if len(models) != 2 {
+		t.Fatalf("claude ran %d times, want 2 (once per account)", len(models))
+	}
+	for i := range models {
+		if models[i] != "haiku" || prompts[i] != "hi" {
+			t.Errorf("call %d used model %q prompt %q, want the haiku/hi defaults", i, models[i], prompts[i])
+		}
+	}
+}
+
+func TestWarmFlagsOverrideDefaults(t *testing.T) {
+	a := warmApp(t)
+	var models, prompts []string
+	a.Warmer = func(_ context.Context, model, prompt string) error {
+		models = append(models, model)
+		prompts = append(prompts, prompt)
+		return nil
+	}
+
+	code, out, stderr := run(t, a, false, "", "warm", "--model", "sonnet", "--prompt", "ping", "--timeout", "5s")
+	if code != 0 {
+		t.Fatalf("exit = %d, out = %q, stderr = %q", code, out, stderr)
+	}
+	for i := range models {
+		if models[i] != "sonnet" || prompts[i] != "ping" {
+			t.Errorf("call %d used model %q prompt %q, want sonnet/ping", i, models[i], prompts[i])
+		}
+	}
+}
+
+// TestWarmExitsNonZeroOnFailure keeps a cron job honest: a failed account has
+// to be visible in $?, not just in the table.
+func TestWarmExitsNonZeroOnFailure(t *testing.T) {
+	a := warmApp(t)
+	a.Warmer = func(context.Context, string, string) error {
+		return errors.New("boom")
+	}
+
+	code, out, stderr := run(t, a, false, "", "warm")
+	if code == 0 {
+		t.Errorf("exit = 0 despite every account failing; out = %q", out)
+	}
+	if !strings.Contains(out, "failed: boom") {
+		t.Errorf("table does not report the failure:\n%s", out)
+	}
+	if !strings.Contains(stderr, "2 of 2 accounts failed to warm") {
+		t.Errorf("stderr missing the summary: %q", stderr)
+	}
+}
+
+func TestWarmJSON(t *testing.T) {
+	a := warmApp(t)
+	failing := map[string]bool{"uuid-b": true}
+	a.Warmer = func(context.Context, string, string) error {
+		st, err := a.Store.LoadState()
+		if err != nil {
+			return err
+		}
+		if failing[st.Active] {
+			return errors.New("needs re-login")
+		}
+		return nil
+	}
+
+	code, out, _ := run(t, a, false, "", "warm", "--json")
+	if code == 0 {
+		t.Error("exit = 0 despite b@x.com failing")
+	}
+	var views []struct {
+		UUID  string `json:"uuid"`
+		Email string `json:"email"`
+		Alias string `json:"alias"`
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(out), &views); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, out)
+	}
+	if len(views) != 2 {
+		t.Fatalf("got %d entries, want 2", len(views))
+	}
+	if !views[0].OK || views[0].Email != "a@x.com" || views[0].Alias != "work" {
+		t.Errorf("first entry = %+v, want a@x.com ok", views[0])
+	}
+	if views[1].OK || views[1].Error != "needs re-login" {
+		t.Errorf("second entry = %+v, want b@x.com failed", views[1])
+	}
+}
+
+// TestWarmRefusesUnregisteredLogin: warm rewrites the live credentials for
+// every account, so it must not run while an unmanaged login is live.
+func TestWarmRefusesUnregisteredLogin(t *testing.T) {
+	a := warmApp(t)
+	writeLiveConfig(t, a, profileJSON("uuid-stranger", "stranger@x.com"))
+	called := false
+	a.Warmer = func(context.Context, string, string) error {
+		called = true
+		return nil
+	}
+
+	code, out, stderr := run(t, a, false, "", "warm")
+	if code == 0 {
+		t.Errorf("exit = 0 with an unregistered login live; out = %q", out)
+	}
+	if called {
+		t.Error("claude ran despite the unregistered login")
+	}
+	if !strings.Contains(stderr, "not a managed account") {
+		t.Errorf("stderr = %q, want it to explain the refusal", stderr)
+	}
+}
+
+func TestWarmHelpCarriesTheCaveat(t *testing.T) {
+	a := newTestApp(t)
+	code, out, stderr := run(t, a, false, "", "warm", "--help")
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %q", code, stderr)
+	}
+	for _, want := range []string{"stomp", "systemd timer or cron", "restored"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("help missing %q:\n%s", want, out)
+		}
 	}
 }
