@@ -65,10 +65,13 @@ type stubReleaser struct {
 
 func (s stubReleaser) Latest(context.Context) (Release, error) { return s.rel, nil }
 
-func (s stubReleaser) Fetch(_ context.Context, url string) ([]byte, error) {
+func (s stubReleaser) Fetch(_ context.Context, url string, progress func(done, total int64)) ([]byte, error) {
 	b, ok := s.blobs[url]
 	if !ok {
 		return nil, fmt.Errorf("no blob for %s", url)
+	}
+	if progress != nil {
+		progress(int64(len(b)), int64(len(b)))
 	}
 	return b, nil
 }
@@ -174,6 +177,31 @@ func TestDownloadEndToEnd(t *testing.T) {
 	}
 	if string(bin) != "NEW-BINARY" {
 		t.Errorf("Download returned %q", bin)
+	}
+}
+
+func TestDownloadReportsProgress(t *testing.T) {
+	archive := makeArchive(t, []byte("NEW-BINARY"))
+	name := "ccswitch_1.2.3_linux_amd64.tar.gz"
+	sums := checksumsFor(archive, name)
+	var lastDone, lastTotal int64
+	c := &Client{
+		Releaser: stubReleaser{
+			rel: Release{Tag: "v1.2.3", Assets: []Asset{
+				{Name: name, URL: "https://dl/archive"},
+				{Name: checksumsName, URL: "https://dl/sums"},
+			}},
+			blobs: map[string][]byte{"https://dl/archive": archive, "https://dl/sums": sums},
+		},
+		GOOS:       "linux",
+		GOARCH:     "amd64",
+		OnProgress: func(done, total int64) { lastDone, lastTotal = done, total },
+	}
+	if _, err := c.Download(context.Background(), c.Releaser.(stubReleaser).rel); err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	if lastDone == 0 || lastDone != int64(len(archive)) || lastTotal != int64(len(archive)) {
+		t.Errorf("progress = %d/%d, want %d/%[3]d", lastDone, lastTotal, len(archive))
 	}
 }
 

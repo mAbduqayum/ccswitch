@@ -25,10 +25,13 @@ type cliReleaser struct {
 
 func (c *cliReleaser) Latest(context.Context) (update.Release, error) { return c.rel, nil }
 
-func (c *cliReleaser) Fetch(_ context.Context, url string) ([]byte, error) {
+func (c *cliReleaser) Fetch(_ context.Context, url string, progress func(done, total int64)) ([]byte, error) {
 	b, ok := c.blobs[url]
 	if !ok {
 		return nil, fmt.Errorf("no blob for %s", url)
+	}
+	if progress != nil {
+		progress(int64(len(b)), int64(len(b)))
 	}
 	return b, nil
 }
@@ -142,6 +145,31 @@ func TestUpdateInPlaceNoPrompt(t *testing.T) {
 	}
 	if info, _ := os.Stat(exe); info.Mode().Perm() != 0o755 {
 		t.Errorf("mode = %v, want 0755", info.Mode().Perm())
+	}
+}
+
+func TestUpdateShowsDownloadProgress(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "ccswitch")
+	if err := os.WriteFile(exe, []byte("OLD"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	upd := &update.Client{
+		Releaser: fakeReleaser(t, []byte("NEWBIN")),
+		GOOS:     testGOOS, GOARCH: testGOARCH,
+		ExecPath: func() (string, error) { return exe, nil },
+		HomeDir:  t.TempDir(),
+	}
+	// On a TTY the download announces itself and renders a progress bar.
+	code, _, stderr := runUpd(t, true, "", "1.0.0", upd, "update")
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, stderr)
+	}
+	if !strings.Contains(stderr, "downloading ccswitch 1.2.3 (linux/amd64)") {
+		t.Errorf("missing download notice: %q", stderr)
+	}
+	if !strings.Contains(stderr, "100%") {
+		t.Errorf("missing progress bar: %q", stderr)
 	}
 }
 

@@ -54,8 +54,10 @@ type Release struct {
 type Releaser interface {
 	// Latest returns the most recent published release.
 	Latest(ctx context.Context) (Release, error)
-	// Fetch downloads the bytes at an asset URL.
-	Fetch(ctx context.Context, url string) ([]byte, error)
+	// Fetch downloads the bytes at an asset URL. If progress is non-nil it is
+	// called as bytes arrive with the running and total counts (total is 0 when
+	// unknown), so the caller can render download progress.
+	Fetch(ctx context.Context, url string, progress func(done, total int64)) ([]byte, error)
 }
 
 // Client bundles the injectable seams the update flow depends on. The CLI owns
@@ -72,6 +74,10 @@ type Client struct {
 	// PathEnv is the raw $PATH used to decide whether the fallback shadows a
 	// package-managed copy. Empty defaults to os.Getenv("PATH").
 	PathEnv string
+	// OnProgress, if set, is called as the release archive downloads with the
+	// bytes fetched so far and the total (0 when unknown). Only the archive
+	// download reports progress; the tiny checksums fetch does not.
+	OnProgress func(done, total int64)
 }
 
 // VersionCheck reports how the running version compares to the latest release.
@@ -151,11 +157,11 @@ func (c *Client) Download(ctx context.Context, rel Release) ([]byte, error) {
 	if !ok {
 		return nil, fmt.Errorf("release %s has no %s to verify against", rel.Tag, checksumsName)
 	}
-	archive, err := c.Releaser.Fetch(ctx, archiveAsset.URL)
+	archive, err := c.Releaser.Fetch(ctx, archiveAsset.URL, c.OnProgress)
 	if err != nil {
 		return nil, fmt.Errorf("download %s: %w", wantName, err)
 	}
-	sums, err := c.Releaser.Fetch(ctx, sumsAsset.URL)
+	sums, err := c.Releaser.Fetch(ctx, sumsAsset.URL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("download %s: %w", checksumsName, err)
 	}
