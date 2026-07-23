@@ -14,11 +14,11 @@ commit-msg:
   commands:
     conventional-commits:
       run: |
-        CONVENTIONAL_COMMIT_PATTERN="^(new|feat|fix|docs|style|ref|perf|test|chore|build|ci|revert)(\(.+\))?:"
+        CONVENTIONAL_COMMIT_PATTERN="^(feat|fix|docs|style|ref|perf|test|chore|build|ci|revert)(\(.+\))?:"
         commit_message=$(cat {1})
         if ! echo "$commit_message" | grep -qE "$CONVENTIONAL_COMMIT_PATTERN"; then
           echo "Commit message must follow conventional commits format:"
           echo "type(scope): description"
-          echo "Types: new, feat, fix, docs, style, ref, perf, test, chore, build, ci, revert"
+          echo "Types: feat, fix, docs, style, ref, perf, test, chore, build, ci, revert"
           exit 1
         fi

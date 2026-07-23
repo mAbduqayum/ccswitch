@@ -16,7 +16,7 @@ Task runner is `just` (recipes in `justfile`):
 
 Single test: `go test ./internal/app -run TestName`.
 
-Dev shell is provided by `flake.nix` (Go toolchain, gopls, golangci-lint, gofumpt, delve, gh, goreleaser) and auto-loads via direnv. `lefthook.yml` runs `gofumpt`, `go vet`, and `golangci-lint --new-from-rev=HEAD~1` on pre-commit, plus a conventional-commits regex on commit-msg (`new|feat|fix|docs|style|ref|perf|test|chore|build|ci|revert`).
+Dev shell is provided by `flake.nix` (Go toolchain, gopls, golangci-lint, gofumpt, delve, gh, goreleaser) and auto-loads via direnv. `lefthook.yml` runs `gofumpt`, `go vet`, and `golangci-lint --new-from-rev=HEAD~1` on pre-commit, plus a conventional-commits regex on commit-msg (`feat|fix|docs|style|ref|perf|test|chore|build|ci|revert`).
 
 ## Architecture
 

@@ -12,8 +12,7 @@ The reproducible path is Nix with flakes + [direnv]/[nix-direnv]: the
 direnv allow      # one-time; auto-enters the dev shell on cd
 ```
 
-No Nix? A system `go` (see the version in `go.mod`) is enough — the codebase
-has no hidden dependencies. The flake just pins versions.
+No Nix? A system `go` (see the version in `go.mod`) is enough.
 
 ## Workflow
 
@@ -25,15 +24,14 @@ just build            # produces ./ccswitch
 just fmt              # gofumpt -w .
 just lint             # golangci-lint run
 just test             # go test -race ./...
-just cover            # tests + coverage summary
 just check            # lint + test
 ```
 
-Run `just fmt lint test` before opening a PR. CI runs lint and govulncheck
-(Linux) and the test suite with `-race` on Linux and macOS; all must pass.
+Run `just fmt` and `just check` before opening a PR. CI runs lint, govulncheck,
+and the test suite with `-race` on Linux and macOS; all must pass.
 
-Never run tests or manual experiments against your real `~/.claude` —
-everything is injectable; use a temp `HOME`/`Env` (see AGENTS.md).
+Never run tests or experiments against your real `~/.claude` — everything is
+injectable; use a temp `HOME`/`Env` (see AGENTS.md).
 
 ## Nix package
 
@@ -50,7 +48,7 @@ Commit messages follow [Conventional Commits]. The `commit-msg` git hook
 (installed via [lefthook]) enforces one of these types:
 
 ```
-new | feat | fix | docs | style | ref | perf | test | chore | build | ci | revert
+feat | fix | docs | style | ref | perf | test | chore | build | ci | revert
 ```
 
 Example: `fix: keep rotation order stable after removing an account`.
@@ -58,7 +56,7 @@ Example: `fix: keep rotation order stable after removing an account`.
 ## Pull requests
 
 1. Branch off `main`.
-2. Keep changes focused; update the README/docs when behavior or config changes.
+2. Keep changes focused; update docs when behavior or config changes.
 3. Reference the issue you're closing (`Closes #NN`).
 4. Make sure CI is green.
 
