@@ -4,7 +4,9 @@
 
 Switch between multiple Claude Code accounts. `ccswitch` snapshots the OAuth
 credentials of each account you log into and swaps them on demand — no
-re-login, no network calls, tokens never leave your machine.
+re-login, no network calls, tokens never leave your machine. (The lone
+exception is the opt-in `ccswitch update` command, which reaches GitHub only
+when you run it.)
 
 ```
      #  ACCOUNT          ALIAS     PLAN  TOKEN
@@ -69,8 +71,19 @@ ccswitch switch work         # by alias, email, list number, or uuid
 ccswitch alias 2 personal    # name an account ("" clears)
 ccswitch remove personal     # forget an account (+ its snapshots); -y skips the prompt
 ccswitch doctor              # health checks; exit 1 on failures
+ccswitch update              # self-update to the latest release
+ccswitch update --check      # report if an update is available, install nothing
 ccswitch completions zsh     # bash | zsh | fish
 ```
+
+`update` is the one command that reaches the network, and only when you run
+it — nothing checks for updates on its own, and it never touches your
+credentials. It downloads the matching release archive, verifies its SHA-256
+against `checksums.txt`, and atomically replaces the running binary. When
+ccswitch was installed by a package manager (Nix, Homebrew) the binary can't
+be overwritten in place; `update` warns, asks first, and — if you agree —
+installs a self-managed copy to `~/.local/bin/ccswitch` that takes PATH
+precedence, after which ccswitch manages its own updates.
 
 Accounts are addressed by list number, email, alias, or account uuid.
 `--json` output is stable metadata (email, alias, plan, token status,
@@ -113,8 +126,10 @@ Claude Code keeps its login in two places: the OAuth credentials
 ccswitch's state lives in `$XDG_DATA_HOME/ccswitch` (default
 `~/.local/share/ccswitch`, mode 0700). Snapshots are stored as the raw bytes
 Claude Code wrote — never re-encoded. Concurrent instances are serialized
-with a file lock. There are **zero network calls**: ccswitch never talks to
-the OAuth provider, only to your filesystem.
+with a file lock. The account-switching, discovery, and doctor paths make
+**zero network calls** — ccswitch never talks to the OAuth provider, only to
+your filesystem. Only the user-initiated `ccswitch update` reaches the
+network (to GitHub Releases), and it never reads or transmits credentials.
 
 ## macOS (experimental)
 

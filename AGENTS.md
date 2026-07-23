@@ -20,8 +20,11 @@ Dev shell is provided by `flake.nix` (Go toolchain, gopls, golangci-lint, gofump
 
 ## Architecture
 
-ccswitch swaps Claude Code's on-disk OAuth state between accounts. It makes
-**zero network calls** and must **never print, log, or marshal token values**.
+ccswitch swaps Claude Code's on-disk OAuth state between accounts. The
+switch/discovery/doctor paths make **zero network calls** and everything must
+**never print, log, or marshal token values**. The single, deliberate network
+exception is the user-initiated `ccswitch update` command (`internal/update`),
+which must stay off those paths and never read or transmit credential state.
 
 - `internal/atomicio` — atomic file writes (temp + rename, 0600 umask-safe), 0700 dirs.
 - `internal/claude` — where Claude Code keeps its state: `Env` path resolution
@@ -36,6 +39,12 @@ ccswitch swaps Claude Code's on-disk OAuth state between accounts. It makes
   new logins, silently refresh known snapshots when live tokens are newer),
   the switch algorithm (snapshot current → restore target → patch profile →
   update active marker), doctor checks.
+- `internal/update` — the opt-in `ccswitch update` self-updater: a `Releaser`
+  network seam (the only `net/http` in the tree), version compare, checksum
+  verification, tar.gz extraction, atomic binary replace, and managed-install
+  detection (Nix store / Homebrew Cellar / non-writable dir → self-managed copy
+  under `~/.local/bin`). Injected into the CLI via `Options` so tests stay
+  hermetic.
 - `internal/cli` — cobra command tree; all IO injectable (`IO` struct) so
   prompts are testable without a TTY.
 - `internal/tui` — bubbletea model; modes list/confirm-add/confirm-remove/

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"runtime/debug"
 
 	"golang.org/x/term"
@@ -11,6 +12,7 @@ import (
 	"github.com/mAbduqayum/ccswitch/internal/claude"
 	"github.com/mAbduqayum/ccswitch/internal/cli"
 	"github.com/mAbduqayum/ccswitch/internal/tui"
+	"github.com/mAbduqayum/ccswitch/internal/update"
 )
 
 // version is injected at release time via -ldflags "-X main.version=...".
@@ -26,6 +28,13 @@ func main() {
 		Version: versionString(),
 		App:     app.New(env),
 		RunTUI:  tui.Run,
+		Update: &update.Client{
+			Releaser: update.NewHTTPReleaser(),
+			GOOS:     runtime.GOOS,
+			GOARCH:   runtime.GOARCH,
+			HomeDir:  env.Home,
+			PathEnv:  os.Getenv("PATH"),
+		},
 		IO: cli.IO{
 			In:  os.Stdin,
 			Out: os.Stdout,
