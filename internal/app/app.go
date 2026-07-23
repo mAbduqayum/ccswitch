@@ -18,15 +18,19 @@ type App struct {
 	Env   claude.Env
 	Store *store.Store
 	Now   func() time.Time
+	// Warmer exercises the live login; only Warm calls it. nil is fine for
+	// every other path.
+	Warmer claude.Warmer
 }
 
 // New wires an App against the real environment.
 func New(env claude.Env) *App {
 	return &App{
-		Creds: claude.NewCredentialStore(env, claude.RealExecRunner),
-		Env:   env,
-		Store: store.New(env.StoreDir()),
-		Now:   time.Now,
+		Creds:  claude.NewCredentialStore(env, claude.RealExecRunner),
+		Env:    env,
+		Store:  store.New(env.StoreDir()),
+		Now:    time.Now,
+		Warmer: claude.RealWarmer,
 	}
 }
 

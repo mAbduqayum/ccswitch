@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -46,6 +47,7 @@ func (r *runner) rootCmd(version string) *cobra.Command {
 		r.removeCmd(),
 		r.aliasCmd(),
 		r.doctorCmd(),
+		r.warmCmd(),
 		r.updateCmd(),
 		r.completionsCmd(),
 	)
@@ -233,6 +235,41 @@ func (r *runner) doctorCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "machine-readable output")
+	return cmd
+}
+
+func (r *runner) warmCmd() *cobra.Command {
+	var (
+		model   string
+		prompt  string
+		timeout time.Duration
+		asJSON  bool
+	)
+	cmd := &cobra.Command{
+		Use:   "warm",
+		Short: "Run claude once as every account so refresh tokens stay alive",
+		Long: "warm cycles through every registered account, running claude once as\n" +
+			"each so Claude Code refreshes that account's credentials — which keeps\n" +
+			"refresh tokens from expiring through disuse. ccswitch still makes no\n" +
+			"network call itself; the claude binary does.\n" +
+			"\n" +
+			"Scheduling is left to the OS — run it from a systemd timer or cron. An\n" +
+			"account that fails (offline, needs re-login) never stops the rest, and\n" +
+			"the account that was active is restored at the end. The exit status is\n" +
+			"non-zero if any account failed.\n" +
+			"\n" +
+			"Caveat: warm swaps the live credential file from account to account as\n" +
+			"it goes, so running it while an interactive claude session is open under\n" +
+			"a different account will stomp that session's credentials.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return r.warm(cmd.Context(), model, prompt, timeout, asJSON)
+		},
+	}
+	cmd.Flags().StringVar(&model, "model", "haiku", "model the warming prompt runs against")
+	cmd.Flags().StringVar(&prompt, "prompt", "hi", "prompt sent to claude")
+	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Second, "per-account time limit for the claude run")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "machine-readable output (metadata only, never tokens)")
 	return cmd
 }
 
