@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 
@@ -44,6 +46,7 @@ func (r *runner) rootCmd(version string) *cobra.Command {
 		r.removeCmd(),
 		r.aliasCmd(),
 		r.doctorCmd(),
+		r.updateCmd(),
 		r.completionsCmd(),
 	)
 	return root
@@ -231,6 +234,85 @@ func (r *runner) doctorCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "machine-readable output")
 	return cmd
+}
+
+func (r *runner) updateCmd() *cobra.Command {
+	var checkOnly, yes bool
+	cmd := &cobra.Command{
+		Use:   "update",
+		Short: "Update ccswitch to the latest release",
+		Long: "Downloads the latest release from GitHub, verifies its checksum, and\n" +
+			"replaces the running binary. This is the only ccswitch command that makes\n" +
+			"a network call, and it never reads or transmits your credentials.",
+		Args:        cobra.NoArgs,
+		Annotations: map[string]string{"skipDiscovery": "true"},
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return r.runUpdate(cmd.Context(), checkOnly, yes)
+		},
+	}
+	cmd.Flags().BoolVar(&checkOnly, "check", false, "report whether an update is available, without installing")
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "confirm installing a self-managed copy when the current install is package-managed")
+	return cmd
+}
+
+func (r *runner) runUpdate(ctx context.Context, checkOnly, yes bool) error {
+	if r.updater == nil {
+		return errors.New("self-update is not wired into this build")
+	}
+	rel, vc, err := r.updater.Check(ctx, r.version)
+	if err != nil {
+		return err
+	}
+	if checkOnly {
+		switch {
+		case vc.Unknown:
+			fmt.Fprintf(r.io.Out, "current version %s could not be compared; latest is %s\n", vc.Current, vc.Latest)
+		case vc.Newer:
+			fmt.Fprintf(r.io.Out, "update available: %s → %s\n", vc.Current, vc.Latest)
+		default:
+			fmt.Fprintf(r.io.Out, "ccswitch is up to date (%s)\n", vc.Current)
+		}
+		return nil
+	}
+	if !vc.Newer {
+		fmt.Fprintf(r.io.Out, "ccswitch is already up to date (%s)\n", vc.Current)
+		return nil
+	}
+
+	target, err := r.updater.Target()
+	if err != nil {
+		return err
+	}
+	if target.Managed {
+		fmt.Fprintf(r.io.Err, "warning: this ccswitch is package-managed — %s.\n", target.Reason)
+		fmt.Fprintf(r.io.Err, "An in-place update isn't possible; ccswitch can install a self-managed copy to %s that takes PATH precedence.\n", target.Dest)
+		if !yes {
+			if !r.io.IsTTY {
+				return errors.New("refusing to install a self-managed copy without confirmation — re-run with --yes, or update with your package manager")
+			}
+			ok, err := r.confirm("Install the self-managed copy and let ccswitch manage updates from now on?")
+			if err != nil {
+				return err
+			}
+			if !ok {
+				// Non-zero so wrappers checking $? never mistake a decline for
+				// a completed update.
+				return errors.New("aborted — update with your package manager instead")
+			}
+		}
+	}
+
+	if err := r.updater.Apply(ctx, rel, target.Dest); err != nil {
+		return err
+	}
+	fmt.Fprintf(r.io.Out, "updated ccswitch %s → %s\n", vc.Current, vc.Latest)
+	if target.Managed {
+		fmt.Fprintf(r.io.Out, "installed to %s — it now shadows your package-managed copy, and ccswitch manages updates from here on.\n", target.Dest)
+		if !r.updater.Shadows(target) {
+			fmt.Fprintf(r.io.Err, "note: %s is not ahead of your package-managed copy on PATH — put it first so the new version is used.\n", filepath.Dir(target.Dest))
+		}
+	}
+	return nil
 }
 
 func (r *runner) completionsCmd() *cobra.Command {

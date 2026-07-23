@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mAbduqayum/ccswitch/internal/app"
+	"github.com/mAbduqayum/ccswitch/internal/update"
 )
 
 // IO carries the process streams. IsTTY gates interactive prompts and the
@@ -33,15 +34,20 @@ type Options struct {
 	// root+TTY path, so nothing is ever buffered ahead of it from stdin.
 	// nil = no TUI wired; root falls back to list.
 	RunTUI func(*app.App) error
+	// Update backs `ccswitch update`, the only networked command. nil = the
+	// command reports that self-update isn't wired into this build.
+	Update *update.Client
 }
 
 // Execute runs the CLI and returns the process exit code.
 func Execute(opts Options, args []string) int {
 	r := &runner{
-		app:    opts.App,
-		io:     opts.IO,
-		in:     bufio.NewReader(opts.IO.In),
-		runTUI: opts.RunTUI,
+		app:     opts.App,
+		io:      opts.IO,
+		in:      bufio.NewReader(opts.IO.In),
+		runTUI:  opts.RunTUI,
+		version: opts.Version,
+		updater: opts.Update,
 	}
 	root := r.rootCmd(opts.Version)
 	root.SetArgs(args)
@@ -59,10 +65,12 @@ func Execute(opts Options, args []string) int {
 }
 
 type runner struct {
-	app    *app.App
-	io     IO
-	in     *bufio.Reader
-	runTUI func(*app.App) error
+	app     *app.App
+	io      IO
+	in      *bufio.Reader
+	runTUI  func(*app.App) error
+	version string
+	updater *update.Client
 }
 
 // preflight runs auto-discovery before every command except those whose
