@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/mAbduqayum/ccswitch/compare/v0.4.0...v0.4.1) (2026-07-24)
+
+
+### Refactoring
+
+* ref:  ([ca8d26b](https://github.com/mAbduqayum/ccswitch/commit/ca8d26bad3c1f96ab09e34125f6b4e56254d4042))
+
 ## [0.4.0](https://github.com/mAbduqayum/ccswitch/compare/v0.3.0...v0.4.0) (2026-07-23)
 
 
