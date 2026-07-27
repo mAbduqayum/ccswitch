@@ -94,8 +94,9 @@ func (r *runner) preflight(cmd *cobra.Command, _ []string) error {
 	return r.discover()
 }
 
-// discover syncs a known live login silently and offers to add an unknown
-// one — y/N prompt on a TTY, a stderr notice otherwise.
+// discover reconciles a known live login — reporting on stderr whatever it
+// had to write, since nothing should change under the user unannounced — and
+// offers to add an unknown one: y/N prompt on a TTY, a stderr notice otherwise.
 func (r *runner) discover() error {
 	d, err := r.app.Discover()
 	if errors.Is(err, app.ErrLiveCredsMalformed) {
@@ -109,8 +110,13 @@ func (r *runner) discover() error {
 	}
 	switch d.Status {
 	case app.Known:
-		_, err := r.app.SyncKnown(d)
-		return err
+		res, err := r.app.SyncKnown(d)
+		if err != nil {
+			return err
+		}
+		for _, note := range res.Notes() {
+			fmt.Fprintln(r.io.Err, "note:", note)
+		}
 	case app.Unknown:
 		if !r.io.IsTTY {
 			fmt.Fprintf(r.io.Err, "note: the current login %s is not managed by ccswitch — run `ccswitch` in a terminal to add it\n", d.Profile.EmailAddress)

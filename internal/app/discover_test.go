@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/mAbduqayum/ccswitch/internal/store"
@@ -256,20 +257,20 @@ func discoverKnown(t *testing.T, a *App) Discovery {
 	return d
 }
 
-func syncKnown(t *testing.T, a *App, d Discovery) bool {
+func syncKnown(t *testing.T, a *App, d Discovery) SyncResult {
 	t.Helper()
-	written, err := a.SyncKnown(d)
+	res, err := a.SyncKnown(d)
 	if err != nil {
 		t.Fatalf("SyncKnown: %v", err)
 	}
-	return written
+	return res
 }
 
 func TestSyncKnown(t *testing.T) {
 	t.Run("everything in sync writes nothing", func(t *testing.T) {
 		a, _ := syncBaseline(t)
-		if syncKnown(t, a, discoverKnown(t, a)) {
-			t.Error("SyncKnown wrote with nothing to do")
+		if res := syncKnown(t, a, discoverKnown(t, a)); res.Changed() {
+			t.Errorf("SyncKnown wrote with nothing to do: %+v", res)
 		}
 	})
 
@@ -277,8 +278,8 @@ func TestSyncKnown(t *testing.T) {
 		a, _ := syncBaseline(t)
 		fresh := credsJSON("a-refreshed", freshExpiry, refreshOK)
 		writeLiveCreds(t, a, fresh)
-		if !syncKnown(t, a, discoverKnown(t, a)) {
-			t.Fatal("SyncKnown did not write")
+		if res := syncKnown(t, a, discoverKnown(t, a)); !res.Creds {
+			t.Fatalf("SyncKnown did not report a credential refresh: %+v", res)
 		}
 		if !bytes.Equal(readSnapshot(t, a, "uuid-a"), fresh) {
 			t.Error("snapshot was not refreshed with the newer live tokens")
@@ -289,8 +290,8 @@ func TestSyncKnown(t *testing.T) {
 		a, _ := syncBaseline(t)
 		fresher := credsJSON("a-fresher", freshExpiry, refreshOK)
 		writeSnapshot(t, a, "uuid-a", fresher)
-		if syncKnown(t, a, discoverKnown(t, a)) {
-			t.Error("SyncKnown wrote although the live tokens are older")
+		if res := syncKnown(t, a, discoverKnown(t, a)); res.Changed() {
+			t.Errorf("SyncKnown wrote although the live tokens are older: %+v", res)
 		}
 		if !bytes.Equal(readSnapshot(t, a, "uuid-a"), fresher) {
 			t.Error("the fresher snapshot was clobbered")
@@ -300,8 +301,8 @@ func TestSyncKnown(t *testing.T) {
 	t.Run("corrupt snapshot is replaced", func(t *testing.T) {
 		a, live := syncBaseline(t)
 		writeSnapshot(t, a, "uuid-a", []byte("junk"))
-		if !syncKnown(t, a, discoverKnown(t, a)) {
-			t.Fatal("SyncKnown did not heal the corrupt snapshot")
+		if res := syncKnown(t, a, discoverKnown(t, a)); !res.Creds {
+			t.Fatalf("SyncKnown did not heal the corrupt snapshot: %+v", res)
 		}
 		if !bytes.Equal(readSnapshot(t, a, "uuid-a"), live) {
 			t.Error("snapshot not replaced with live bytes")
@@ -313,8 +314,8 @@ func TestSyncKnown(t *testing.T) {
 		if err := os.Remove(filepath.Join(a.Store.Dir(), "accounts", "uuid-a", "credentials.json")); err != nil {
 			t.Fatal(err)
 		}
-		if !syncKnown(t, a, discoverKnown(t, a)) {
-			t.Fatal("SyncKnown did not heal the missing snapshot")
+		if res := syncKnown(t, a, discoverKnown(t, a)); !res.Creds {
+			t.Fatalf("SyncKnown did not heal the missing snapshot: %+v", res)
 		}
 		if !bytes.Equal(readSnapshot(t, a, "uuid-a"), live) {
 			t.Error("snapshot not recreated from live bytes")
@@ -326,8 +327,8 @@ func TestSyncKnown(t *testing.T) {
 		st := loadState(t, a)
 		st.Active = ""
 		saveState(t, a, st)
-		if !syncKnown(t, a, discoverKnown(t, a)) {
-			t.Fatal("SyncKnown did not heal the active marker")
+		if res := syncKnown(t, a, discoverKnown(t, a)); !res.Active {
+			t.Fatalf("SyncKnown did not heal the active marker: %+v", res)
 		}
 		if got := loadState(t, a).Active; got != "uuid-a" {
 			t.Errorf("Active = %q, want uuid-a", got)
@@ -343,8 +344,8 @@ func TestSyncKnown(t *testing.T) {
 		writeSnapshot(t, a, "uuid-a", live)
 		writeProfile(t, a, "uuid-a", profileJSON("uuid-a", "new@x.com"))
 
-		if !syncKnown(t, a, discoverKnown(t, a)) {
-			t.Fatal("SyncKnown did not update the drifted email")
+		if res := syncKnown(t, a, discoverKnown(t, a)); res.NewEmail != "new@x.com" {
+			t.Fatalf("SyncKnown did not report the drifted email: %+v", res)
 		}
 		if got := loadState(t, a).Accounts[0].Email; got != "new@x.com" {
 			t.Errorf("email = %q, want new@x.com", got)
@@ -354,8 +355,8 @@ func TestSyncKnown(t *testing.T) {
 	t.Run("profile drift is captured", func(t *testing.T) {
 		a, _ := syncBaseline(t)
 		writeProfile(t, a, "uuid-a", []byte(`{"accountUuid":"uuid-a","emailAddress":"stale@x.com"}`))
-		if !syncKnown(t, a, discoverKnown(t, a)) {
-			t.Fatal("SyncKnown did not update the drifted profile")
+		if res := syncKnown(t, a, discoverKnown(t, a)); !res.Profile {
+			t.Fatalf("SyncKnown did not update the drifted profile: %+v", res)
 		}
 		p, err := a.Store.ReadProfile("uuid-a")
 		if err != nil || !bytes.Equal(p, profileJSON("uuid-a", "a@x.com")) {
@@ -365,9 +366,9 @@ func TestSyncKnown(t *testing.T) {
 
 	t.Run("non-known discovery is a no-op", func(t *testing.T) {
 		a := newTestApp(t)
-		written, err := a.SyncKnown(Discovery{Status: Unknown})
-		if written || err != nil {
-			t.Errorf("got %v, %v; want false, nil", written, err)
+		res, err := a.SyncKnown(Discovery{Status: Unknown})
+		if res.Changed() || err != nil {
+			t.Errorf("got %+v, %v; want an unchanged result and no error", res, err)
 		}
 	})
 
@@ -378,8 +379,8 @@ func TestSyncKnown(t *testing.T) {
 		if err := a.Remove("uuid-a"); err != nil {
 			t.Fatal(err)
 		}
-		if syncKnown(t, a, d) {
-			t.Error("SyncKnown wrote for a removed account")
+		if res := syncKnown(t, a, d); res.Changed() {
+			t.Errorf("SyncKnown wrote for a removed account: %+v", res)
 		}
 		st := loadState(t, a)
 		if st.IndexByUUID("uuid-a") != -1 || st.Active != "" {
@@ -389,4 +390,50 @@ func TestSyncKnown(t *testing.T) {
 			t.Error("snapshot resurrected after removal")
 		}
 	})
+}
+
+func TestSyncResultNotes(t *testing.T) {
+	acct := store.Account{UUID: "uuid-a", Email: "a@x.com"}
+	tests := []struct {
+		name string
+		res  SyncResult
+		want []string
+	}{
+		{"nothing written", SyncResult{Account: acct}, nil},
+		{
+			"a refresh is always reported",
+			SyncResult{Account: acct, Creds: true},
+			[]string{"stored refreshed credentials for a@x.com"},
+		},
+		{
+			"profile drift alone stays quiet",
+			SyncResult{Account: acct, Profile: true},
+			nil,
+		},
+		{
+			"an adopted login reports both",
+			SyncResult{Account: acct, Creds: true, Profile: true, Active: true},
+			[]string{
+				"stored refreshed credentials for a@x.com",
+				"a@x.com became the active account outside ccswitch",
+			},
+		},
+		{
+			"a drifted email names both addresses",
+			SyncResult{Account: acct, NewEmail: "new@x.com"},
+			[]string{"a@x.com is now on record as new@x.com"},
+		},
+		{
+			"an account with no email falls back to its uuid",
+			SyncResult{Account: store.Account{UUID: "uuid-a"}, Creds: true},
+			[]string{"stored refreshed credentials for uuid-a"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.res.Notes(); !slices.Equal(got, tt.want) {
+				t.Errorf("Notes() = %q, want %q", got, tt.want)
+			}
+		})
+	}
 }

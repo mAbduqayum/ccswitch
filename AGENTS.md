@@ -39,9 +39,10 @@ API itself, it execs the official `claude` binary (via the injectable
   `state.json` (schema v1; account list order = rotation order), raw
   per-account credential/profile snapshots, flock around mutations.
 - `internal/app` — orchestration shared by CLI and TUI: discovery (auto-add
-  new logins, silently refresh known snapshots when live tokens are newer),
-  the switch algorithm (snapshot current → restore target → patch profile →
-  update active marker), doctor checks, and the `warm` cycle (switch to each
+  new logins; refresh known snapshots when live tokens are newer, reporting
+  what was written via `SyncResult.Notes` — a store that changes under the
+  user must never do so silently), the switch algorithm (snapshot current →
+  restore target → patch profile → update active marker), doctor checks, and the `warm` cycle (switch to each
   account → run claude as it → restore the original, so idle refresh tokens
   never expire).
 - `internal/update` — the opt-in `ccswitch update` self-updater: a `Releaser`

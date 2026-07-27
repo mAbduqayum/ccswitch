@@ -460,6 +460,57 @@ func TestDiscoveryPrompt(t *testing.T) {
 	})
 }
 
+// Discovery rewrites the stored snapshot whenever Claude Code refreshed the
+// live tokens; the user has to be told that happened.
+func TestDiscoveryReportsSync(t *testing.T) {
+	t.Run("a refreshed snapshot is announced on stderr", func(t *testing.T) {
+		a := newTestApp(t)
+		seedTwoAccounts(t, a)
+		writeLiveCreds(t, a, credsJSON("a-refreshed", freshExpiry, refreshOK))
+		writeLiveConfig(t, a, profileJSON("uuid-a", "a@x.com"))
+
+		code, out, stderr := run(t, a, false, "", "list")
+		if code != 0 {
+			t.Fatalf("exit = %d, stderr = %q", code, stderr)
+		}
+		if !strings.Contains(stderr, "note: stored refreshed credentials for a@x.com") {
+			t.Errorf("stderr = %q, want a refresh note", stderr)
+		}
+		if strings.Contains(out, "note:") {
+			t.Errorf("the note leaked into stdout: %q", out)
+		}
+	})
+
+	t.Run("a login adopted outside ccswitch is announced too", func(t *testing.T) {
+		a := newTestApp(t)
+		seedTwoAccounts(t, a)
+		// b@x.com logged in behind ccswitch's back: same tokens as its
+		// snapshot, but it is not the account the store thinks is active.
+		writeLiveCreds(t, a, credsJSON("b", staleExpiry, refreshOK))
+		writeLiveConfig(t, a, profileJSON("uuid-b", "b@x.com"))
+
+		code, _, stderr := run(t, a, false, "", "list")
+		if code != 0 {
+			t.Fatalf("exit = %d, stderr = %q", code, stderr)
+		}
+		if !strings.Contains(stderr, "b@x.com became the active account outside ccswitch") {
+			t.Errorf("stderr = %q, want an active-marker note", stderr)
+		}
+	})
+
+	t.Run("an in-sync login says nothing", func(t *testing.T) {
+		a := newTestApp(t)
+		seedTwoAccounts(t, a)
+		writeLiveCreds(t, a, credsJSON("a", staleExpiry, refreshOK))
+		writeLiveConfig(t, a, profileJSON("uuid-a", "a@x.com"))
+
+		code, _, stderr := run(t, a, false, "", "list")
+		if code != 0 || stderr != "" {
+			t.Errorf("exit = %d, stderr = %q, want silence when nothing drifted", code, stderr)
+		}
+	})
+}
+
 func TestSwitchForce(t *testing.T) {
 	seedUnknownLive := func(t *testing.T) *app.App {
 		t.Helper()

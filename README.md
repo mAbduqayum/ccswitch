@@ -108,9 +108,10 @@ Every invocation starts with a read-only look at the live login:
 
 - **Unknown account** → ccswitch offers to add it (y/N in a terminal, a notice
   on stderr otherwise — pipelines never block).
-- **Known account** → its snapshot silently refreshes when the live tokens are
-  newer (Claude Code rotates refresh tokens). An older live file never
-  overwrites a fresher snapshot.
+- **Known account** → its snapshot refreshes when the live tokens are newer
+  (Claude Code rotates refresh tokens), and says so — `note: stored refreshed
+  credentials for you@example.com` on stderr, or a line in the TUI status bar.
+  An older live file never overwrites a fresher snapshot.
 
 So switching A→B→A round-trips through re-logins done outside ccswitch without
 ever losing a rotated refresh token.

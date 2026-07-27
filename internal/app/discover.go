@@ -142,83 +142,129 @@ func (a *App) snapshotNeedsRefresh(uuid string, live claude.CredentialMeta) (boo
 	return perr != nil || live.ExpiresAt > snapMeta.ExpiresAt, nil //nolint:nilerr // a corrupt snapshot is simply replaced
 }
 
-// syncNeeds lists what SyncKnown has to write.
-type syncNeeds struct{ creds, profile, active, email bool }
+// SyncResult reports what SyncKnown wrote, so callers can tell the user that
+// their stored state moved underneath them. The zero value means the store
+// already agreed with the live login.
+type SyncResult struct {
+	// Account is the account as it stood before the sync — NewEmail below is
+	// what replaced its address.
+	Account store.Account
+	// Creds covers both the routine refresh Claude Code performs while an
+	// account is live and the healing of a missing or corrupt snapshot.
+	Creds bool
+	// Profile means the stored profile snapshot followed config drift.
+	Profile bool
+	// Active means the marker moved onto this account, which is how a login
+	// made outside ccswitch is adopted.
+	Active bool
+	// NewEmail is the profile's email when it no longer matches the one on
+	// record; empty when the stored email was already right.
+	NewEmail string
+}
 
-func (n syncNeeds) any() bool { return n.creds || n.profile || n.active || n.email }
+// Changed reports whether SyncKnown wrote anything.
+func (r SyncResult) Changed() bool { return r.Creds || r.Profile || r.Active || r.NewEmail != "" }
 
-// computeSyncNeeds decides what SyncKnown must write, judged against the
-// current on-disk state. An account removed since discovery yields no needs
-// at all — sync must never resurrect it.
-func (a *App) computeSyncNeeds(d Discovery) (syncNeeds, store.State, error) {
-	var n syncNeeds
+// changesState reports whether the sync touched state.json — the snapshots
+// live in their own files and are written before it.
+func (r SyncResult) changesState() bool { return r.Active || r.NewEmail != "" }
+
+// Notes renders what the user needs to know about the sync. Profile drift
+// alone stays silent: Claude Code rewrites its config constantly and a
+// snapshot following it changes nothing the user could act on.
+func (r SyncResult) Notes() []string {
+	label := r.Account.Email
+	if label == "" {
+		label = r.Account.UUID
+	}
+	var notes []string
+	if r.Creds {
+		notes = append(notes, fmt.Sprintf("stored refreshed credentials for %s", label))
+	}
+	if r.Active {
+		notes = append(notes, fmt.Sprintf("%s became the active account outside ccswitch", label))
+	}
+	if r.NewEmail != "" {
+		notes = append(notes, fmt.Sprintf("%s is now on record as %s", label, r.NewEmail))
+	}
+	return notes
+}
+
+// computeSync decides what SyncKnown must write, judged against the current
+// on-disk state. An account removed since discovery yields nothing to do at
+// all — sync must never resurrect it.
+func (a *App) computeSync(d Discovery) (SyncResult, store.State, error) {
+	r := SyncResult{Account: d.Account}
 	st, err := a.Store.LoadState()
 	if err != nil {
-		return n, st, err
+		return r, st, err
 	}
 	idx := st.IndexByUUID(d.Account.UUID)
 	if idx == -1 {
-		return n, st, nil
+		return r, st, nil
 	}
-	if n.creds, err = a.snapshotNeedsRefresh(d.Account.UUID, d.Meta); err != nil {
-		return n, st, err
+	if r.Creds, err = a.snapshotNeedsRefresh(d.Account.UUID, d.Meta); err != nil {
+		return r, st, err
 	}
 	stored, err := a.Store.ReadProfile(d.Account.UUID)
 	if err != nil {
-		return n, st, err
+		return r, st, err
 	}
-	n.profile = d.RawProfile != nil && !bytes.Equal(d.RawProfile, stored)
-	n.active = st.Active != d.Account.UUID
-	n.email = d.Profile.EmailAddress != "" && st.Accounts[idx].Email != d.Profile.EmailAddress
-	return n, st, nil
+	r.Profile = d.RawProfile != nil && !bytes.Equal(d.RawProfile, stored)
+	r.Active = st.Active != d.Account.UUID
+	if d.Profile.EmailAddress != "" && st.Accounts[idx].Email != d.Profile.EmailAddress {
+		r.NewEmail = d.Profile.EmailAddress
+	}
+	return r, st, nil
 }
 
 // SyncKnown reconciles the store with a known live login: strictly newer
 // live tokens replace the stored snapshot (so refresh tokens never rot),
 // profile drift is captured, the stored email follows the profile, and the
-// active marker heals after logins done outside ccswitch. Returns whether
-// anything was written.
-func (a *App) SyncKnown(d Discovery) (bool, error) {
+// active marker heals after logins done outside ccswitch. The result says
+// what was written so the caller can report it; a zero result means the
+// store already agreed with the live login.
+func (a *App) SyncKnown(d Discovery) (SyncResult, error) {
 	if d.Status != Known {
-		return false, nil
+		return SyncResult{}, nil
 	}
 	// Unlocked fast path: the common nothing-drifted case takes no lock.
-	need, _, err := a.computeSyncNeeds(d)
-	if err != nil || !need.any() {
-		return false, err
+	res, _, err := a.computeSync(d)
+	if err != nil || !res.Changed() {
+		return SyncResult{}, err
 	}
 
 	unlock, err := a.Store.Lock()
 	if err != nil {
-		return false, err
+		return SyncResult{}, err
 	}
 	defer unlock()
 	// Recompute under the lock: since the unlocked look, another process may
 	// have written a fresher snapshot (invalidating our decision to refresh
 	// it) or removed the account entirely.
-	need, st, err := a.computeSyncNeeds(d)
-	if err != nil || !need.any() {
-		return false, err
+	res, st, err := a.computeSync(d)
+	if err != nil || !res.Changed() {
+		return SyncResult{}, err
 	}
 	uuid := d.Account.UUID
-	if need.creds {
+	if res.Creds {
 		if err := a.Store.WriteSnapshot(uuid, d.RawCreds); err != nil {
-			return false, err
+			return SyncResult{}, err
 		}
 	}
-	if need.profile {
+	if res.Profile {
 		if err := a.Store.WriteProfile(uuid, d.RawProfile); err != nil {
-			return false, err
+			return SyncResult{}, err
 		}
 	}
-	if need.email {
-		st.Accounts[st.IndexByUUID(uuid)].Email = d.Profile.EmailAddress
+	if res.NewEmail != "" {
+		st.Accounts[st.IndexByUUID(uuid)].Email = res.NewEmail
 	}
-	if need.active {
+	if res.Active {
 		st.Active = uuid
 	}
-	if need.email || need.active {
-		return true, a.Store.SaveState(st)
+	if res.changesState() {
+		return res, a.Store.SaveState(st)
 	}
-	return true, nil
+	return res, nil
 }

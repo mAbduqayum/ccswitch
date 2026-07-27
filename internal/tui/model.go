@@ -57,10 +57,12 @@ type (
 		rows []accountRow
 		err  error
 	}
-	// discoveredMsg is the result of a discovery pass (sync already done).
+	// discoveredMsg is the result of a discovery pass; sync carries what the
+	// pass had to write, which the status bar reports.
 	discoveredMsg struct {
-		d   app.Discovery
-		err error
+		d    app.Discovery
+		sync app.SyncResult
+		err  error
 	}
 	switchedMsg struct {
 		res app.SwitchResult
@@ -144,12 +146,12 @@ func (m Model) discoverCmd() tea.Cmd {
 		if err != nil {
 			return discoveredMsg{err: err}
 		}
-		if d.Status == app.Known {
-			if _, err := m.app.SyncKnown(d); err != nil {
-				return discoveredMsg{err: err}
-			}
+		// SyncKnown no-ops on every other status.
+		res, err := m.app.SyncKnown(d)
+		if err != nil {
+			return discoveredMsg{err: err}
 		}
-		return discoveredMsg{d: d}
+		return discoveredMsg{d: d, sync: res}
 	}
 }
 
@@ -211,6 +213,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = "error: " + msg.err.Error()
 			return m, m.loadCmd()
 		}
+		if notes := msg.sync.Notes(); len(notes) > 0 {
+			m.status = statusLine(notes)
+		}
 		switch {
 		case msg.d.Status != app.Unknown:
 			m.queuedAdd = nil // a fresher discovery supersedes anything queued
@@ -235,8 +240,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, m.loadCmd()
 		}
-		notes := append([]string{"switched to " + msg.res.To.Email}, msg.res.Warnings...)
-		m.status = strings.Join(notes, " · ")
+		m.status = statusLine(append([]string{"switched to " + msg.res.To.Email}, msg.res.Warnings...))
 		return m, m.loadCmd()
 
 	case actionDoneMsg:
@@ -349,6 +353,9 @@ func (m *Model) leaveDialog() {
 	}
 	m.mode = modeList
 }
+
+// statusLine packs several notes into the one-line status bar.
+func statusLine(notes []string) string { return strings.Join(notes, " · ") }
 
 func (m *Model) setRows(rows []accountRow) {
 	m.rows = rows

@@ -69,19 +69,26 @@ func seedTwoAccounts(t *testing.T, a *app.App) {
 	}
 }
 
-func seedUnknownLogin(t *testing.T, a *app.App) {
+// writeLive plants a live login: credentials plus the profile Claude Code
+// records for them.
+func writeLive(t *testing.T, a *app.App, creds, rawProfile []byte) {
 	t.Helper()
 	path := a.Env.CredentialsPath()
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, credsJSON("n", freshExpiry, refreshOK), 0o600); err != nil {
+	if err := os.WriteFile(path, creds, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg := fmt.Appendf(nil, `{"oauthAccount": %s}`, profileJSON("uuid-n", "n@x.com"))
+	cfg := fmt.Appendf(nil, `{"oauthAccount": %s}`, rawProfile)
 	if err := os.WriteFile(a.Env.ConfigPath(), cfg, 0o600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func seedUnknownLogin(t *testing.T, a *app.App) {
+	t.Helper()
+	writeLive(t, a, credsJSON("n", freshExpiry, refreshOK), profileJSON("uuid-n", "n@x.com"))
 }
 
 // drive feeds msg into the model and synchronously executes every command
@@ -158,6 +165,34 @@ func TestDiscoverUnknownOpensConfirmAdd(t *testing.T) {
 	if view := m.View(); !strings.Contains(view, "n@x.com") || !strings.Contains(view, "[y/N]") {
 		t.Errorf("confirm dialog missing:\n%s", view)
 	}
+}
+
+func TestDiscoverReportsSyncInStatus(t *testing.T) {
+	t.Run("a refreshed snapshot reaches the status bar", func(t *testing.T) {
+		a := newTestApp(t)
+		seedTwoAccounts(t, a)
+		writeLive(t, a, credsJSON("a-refreshed", freshExpiry, refreshOK), profileJSON("uuid-a", "a@x.com"))
+		m := New(a)
+		m = drive(t, m, m.discoverCmd()())
+		want := "stored refreshed credentials for a@x.com"
+		if !strings.Contains(m.status, want) {
+			t.Errorf("status = %q, want %q", m.status, want)
+		}
+		if view := m.View(); !strings.Contains(view, want) {
+			t.Errorf("status missing from the view:\n%s", view)
+		}
+	})
+
+	t.Run("an in-sync login leaves the status bar alone", func(t *testing.T) {
+		a := newTestApp(t)
+		seedTwoAccounts(t, a)
+		writeLive(t, a, credsJSON("a", staleExpiry, refreshOK), profileJSON("uuid-a", "a@x.com"))
+		m := New(a)
+		m = drive(t, m, m.discoverCmd()())
+		if m.status != "" {
+			t.Errorf("status = %q, want silence when nothing drifted", m.status)
+		}
+	})
 }
 
 func TestConfirmAdd(t *testing.T) {
