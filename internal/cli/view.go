@@ -40,6 +40,15 @@ type warmView struct {
 	Error string `json:"error,omitempty"`
 }
 
+// accountLabel names an account for humans: its email, with the alias in
+// parentheses when one is set.
+func accountLabel(email, alias string) string {
+	if alias == "" {
+		return email
+	}
+	return fmt.Sprintf("%s (%s)", email, alias)
+}
+
 func (r *runner) accountViews(st store.State) []accountView {
 	views := make([]accountView, 0, len(st.Accounts))
 	for i, acc := range st.Accounts {
@@ -105,10 +114,7 @@ func (r *runner) status(asJSON bool) error {
 	}
 	w := tabwriter.NewWriter(r.io.Out, 2, 0, 2, ' ', 0)
 	if v := view.Active; v != nil {
-		label := v.Email
-		if v.Alias != "" {
-			label = fmt.Sprintf("%s (%s)", v.Email, v.Alias)
-		}
+		label := accountLabel(v.Email, v.Alias)
 		detail := "token " + v.TokenStatus
 		if v.Plan != "" {
 			detail = v.Plan + ", " + detail
@@ -151,15 +157,11 @@ func (r *runner) warm(ctx context.Context, model, prompt string, timeout time.Du
 		w := tabwriter.NewWriter(r.io.Out, 2, 0, 2, ' ', 0)
 		fmt.Fprintln(w, "ACCOUNT\tRESULT")
 		for _, v := range views {
-			label := v.Email
-			if v.Alias != "" {
-				label = fmt.Sprintf("%s (%s)", v.Email, v.Alias)
-			}
 			result := "ok"
 			if !v.OK {
 				result = "failed: " + v.Error
 			}
-			fmt.Fprintf(w, "%s\t%s\n", label, result)
+			fmt.Fprintf(w, "%s\t%s\n", accountLabel(v.Email, v.Alias), result)
 		}
 		if err := w.Flush(); err != nil {
 			return err

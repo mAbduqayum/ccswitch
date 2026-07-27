@@ -327,7 +327,7 @@ func TestSwitchCredWriteErrorPreservesSnapshot(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "disk full") {
 		t.Fatalf("error = %v, want the write error", err)
 	}
-	// Step 1 completed before the failure: the refreshed tokens are safe in
+	// bankLive completed before the failure: the refreshed tokens are safe in
 	// A's slot, and the active marker still points at the truth.
 	if got := readSnapshot(t, w.a, "uuid-a"); !bytes.Equal(got, w.liveA) {
 		t.Error("A's snapshot does not hold the live tokens after the failed switch")

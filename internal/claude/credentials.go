@@ -81,7 +81,6 @@ type CredentialMeta struct {
 	SubscriptionType      string   `json:"subscriptionType"`
 }
 
-func (m CredentialMeta) AccessExpiry() time.Time  { return time.UnixMilli(m.ExpiresAt) }
 func (m CredentialMeta) RefreshExpiry() time.Time { return time.UnixMilli(m.RefreshTokenExpiresAt) }
 
 // ParseCredentials extracts displayable metadata from raw credentials JSON.

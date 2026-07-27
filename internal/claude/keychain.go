@@ -12,6 +12,10 @@ import (
 // stores its credentials under.
 const keychainService = "Claude Code-credentials"
 
+// errSecItemNotFound is security(1)'s exit status when the keychain item does
+// not exist.
+const errSecItemNotFound = 44
+
 // ExecRunner runs an external command and returns its stdout. Injectable so
 // the keychain logic is unit-testable off-macOS.
 type ExecRunner func(stdin []byte, name string, args ...string) ([]byte, error)
@@ -54,12 +58,11 @@ func (s *keychainStore) Read() ([]byte, error) {
 	return bytes.TrimSuffix(out, []byte("\n")), nil
 }
 
-// isKeychainNotFound recognizes security(1)'s item-not-found failure: exit
-// code 44 (errSecItemNotFound), or its stderr wording for fakes and older
-// versions.
+// isKeychainNotFound recognizes security(1)'s item-not-found failure by exit
+// status, falling back to its stderr wording for fakes and older versions.
 func isKeychainNotFound(err error) bool {
 	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) && exitErr.ExitCode() == 44 {
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == errSecItemNotFound {
 		return true
 	}
 	return strings.Contains(err.Error(), "could not be found")

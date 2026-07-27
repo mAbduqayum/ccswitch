@@ -20,10 +20,17 @@ type SwitchResult struct {
 	Warnings       []string
 }
 
-// Switch makes target's snapshot the live credentials. The order is
-// critical: the live credentials are snapshotted into the current account's
-// slot FIRST, so token refreshes Claude Code performed since the last
-// switch are never lost.
+// warn records a non-fatal problem; the empty string records nothing, so
+// callers can hand over an optional warning unconditionally.
+func (r *SwitchResult) warn(msg string) {
+	if msg != "" {
+		r.Warnings = append(r.Warnings, msg)
+	}
+}
+
+// Switch makes target's snapshot the live credentials. The order below is
+// critical and must not be rearranged: bankLive runs FIRST, so token
+// refreshes Claude Code performed since the last switch are never lost.
 func (a *App) Switch(target store.Account, force bool) (SwitchResult, error) {
 	res := SwitchResult{To: target}
 	unlock, err := a.Store.Lock()
@@ -52,70 +59,104 @@ func (a *App) Switch(target store.Account, force bool) (SwitchResult, error) {
 		return res, err
 	}
 
-	// (1) Snapshot the live credentials into the current account's slot.
-	liveRaw, err := a.Creds.Read()
-	switch {
-	case errors.Is(err, claude.ErrNotLoggedIn):
-		// Nothing live to preserve.
-	case err != nil:
+	banked, err := a.bankLive(st, target, force)
+	if err != nil {
 		return res, err
-	default:
-		liveMeta, perr := claude.ParseCredentials(liveRaw)
-		if perr != nil {
-			return res, fmt.Errorf("refusing to switch: live credentials at %s are malformed (%w) — run `claude /login` to repair them first", a.Creds.Location(), perr)
-		}
-		cur, ok := a.identifyLive(st)
-		switch {
-		case ok && cur.UUID == target.UUID:
-			// Switching to the already-live account: the live tokens are
-			// the freshest copy, so restore those, not the older snapshot.
-			snap = liveRaw
-			res.From = cur
-		case ok:
-			// identifyLive's active-marker fallback can misattribute a
-			// foreign login, so only overwrite the slot when the live
-			// tokens are strictly newer than the stored snapshot.
-			refresh, err := a.snapshotNeedsRefresh(cur.UUID, liveMeta)
-			if err != nil {
-				return res, err
-			}
-			if refresh {
-				if err := a.Store.WriteSnapshot(cur.UUID, liveRaw); err != nil {
-					return res, err
-				}
-			}
-			res.From = cur
-		case force:
-			res.Warnings = append(res.Warnings, "discarded the credentials of an unregistered login")
-		default:
-			return res, fmt.Errorf("%w — rerun `ccswitch` and accept the add prompt, or pass --force to discard its credentials", ErrUnsavedLogin)
-		}
+	}
+	res.From = banked.from
+	res.warn(banked.warning)
+	if banked.restore != nil {
+		snap = banked.restore
 	}
 
-	// (2) Restore the target's snapshot as the live credentials.
 	if err := a.Creds.Write(snap); err != nil {
 		return res, err
 	}
 
-	// (3) Best-effort: patch the profile into the claude config so the UI
-	// shows the right identity immediately. Claude Code refetches profiles
-	// itself, so failure is only a warning.
-	if p, perr := a.Store.ReadProfile(target.UUID); perr == nil && p != nil {
-		if cfgErr := claude.PatchOAuthAccount(a.Env.ConfigPath(), p); cfgErr != nil {
-			res.Warnings = append(res.Warnings,
-				fmt.Sprintf("could not update the profile in the claude config: %v (Claude Code will refetch it)", cfgErr))
-		} else {
-			res.ProfilePatched = true
-		}
-	}
+	patched, warning := a.patchLiveProfile(target.UUID)
+	res.ProfilePatched = patched
+	res.warn(warning)
 
-	// (4) Update the active marker.
 	st.Active = target.UUID
 	if err := a.Store.SaveState(st); err != nil {
 		return res, err
 	}
 
 	return res, nil
+}
+
+// bankedLive is what banking the live credentials settled about the login
+// being switched away from.
+type bankedLive struct {
+	// from is the account the live credentials belonged to; the zero value
+	// when none could be identified.
+	from store.Account
+	// restore holds the live bytes when they belong to the switch target
+	// itself: they are fresher than its stored snapshot, so they are what
+	// goes back live. nil in every other case.
+	restore []byte
+	// warning is empty unless something non-fatal happened.
+	warning string
+}
+
+// bankLive writes the live credentials into their owner's slot, preserving
+// every token refresh Claude Code performed since the last switch. Switch
+// calls it BEFORE restoring the target: reversing that order would overwrite
+// the live file while the current account's newest refresh token exists
+// nowhere else.
+func (a *App) bankLive(st store.State, target store.Account, force bool) (bankedLive, error) {
+	liveRaw, err := a.Creds.Read()
+	if errors.Is(err, claude.ErrNotLoggedIn) {
+		return bankedLive{}, nil // nothing live to preserve
+	}
+	if err != nil {
+		return bankedLive{}, err
+	}
+	liveMeta, err := claude.ParseCredentials(liveRaw)
+	if err != nil {
+		return bankedLive{}, fmt.Errorf("refusing to switch: live credentials at %s are malformed (%w) — run `claude /login` to repair them first", a.Creds.Location(), err)
+	}
+
+	cur, identified := a.identifyLive(st)
+	switch {
+	case !identified && force:
+		return bankedLive{warning: "discarded the credentials of an unregistered login"}, nil
+	case !identified:
+		return bankedLive{}, fmt.Errorf("%w — rerun `ccswitch` and accept the add prompt, or pass --force to discard its credentials", ErrUnsavedLogin)
+	case cur.UUID == target.UUID:
+		// Switching to the already-live account: the live tokens are the
+		// freshest copy, so restore those, not the older snapshot.
+		return bankedLive{from: cur, restore: liveRaw}, nil
+	}
+
+	// identifyLive's active-marker fallback can misattribute a foreign login,
+	// so only overwrite the slot when the live tokens are strictly newer than
+	// the stored snapshot.
+	refresh, err := a.snapshotNeedsRefresh(cur.UUID, liveMeta)
+	if err != nil {
+		return bankedLive{}, err
+	}
+	if refresh {
+		if err := a.Store.WriteSnapshot(cur.UUID, liveRaw); err != nil {
+			return bankedLive{}, err
+		}
+	}
+	return bankedLive{from: cur}, nil
+}
+
+// patchLiveProfile copies the account's stored profile into the claude config
+// so its UI shows the right identity immediately. Best-effort: Claude Code
+// refetches profiles on its own, so a failure only earns a warning, and a
+// never-captured profile earns nothing at all.
+func (a *App) patchLiveProfile(uuid string) (patched bool, warning string) {
+	profile, err := a.Store.ReadProfile(uuid)
+	if err != nil || profile == nil {
+		return false, ""
+	}
+	if err := claude.PatchOAuthAccount(a.Env.ConfigPath(), profile); err != nil {
+		return false, fmt.Sprintf("could not update the profile in the claude config: %v (Claude Code will refetch it)", err)
+	}
+	return true, ""
 }
 
 // identifyLive determines which registered account the live credentials

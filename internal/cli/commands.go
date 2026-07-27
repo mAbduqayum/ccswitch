@@ -120,10 +120,7 @@ func (r *runner) switchTo(args []string, force bool) error {
 	for _, w := range res.Warnings {
 		fmt.Fprintln(r.io.Err, "warning:", w)
 	}
-	label := target.Email
-	if target.Alias != "" {
-		label = fmt.Sprintf("%s (%s)", target.Email, target.Alias)
-	}
+	label := accountLabel(target.Email, target.Alias)
 	if res.From.UUID != "" && res.From.UUID != target.UUID {
 		fmt.Fprintf(r.io.Out, "switched %s → %s\n", res.From.Email, label)
 	} else {
@@ -357,6 +354,11 @@ func (r *runner) runUpdate(ctx context.Context, checkOnly, yes bool) error {
 	return nil
 }
 
+// bytesPerRedrawWithoutTotal paces the download bar when the server sent no
+// Content-Length: with no percentage to advance, the byte count is what
+// throttles the redraws.
+const bytesPerRedrawWithoutTotal = 256 << 10
+
 // downloadProgress returns a callback that renders a live download bar and a
 // finish func that terminates the bar's line. On a non-TTY (piped) run the
 // callback is nil — the "downloading…" notice is the only signal — and finish
@@ -373,14 +375,14 @@ func (r *runner) downloadProgress() (report func(done, total int64), finish func
 		if total > 0 {
 			pct := int(done * 100 / total)
 			if pct == lastPct {
-				return // redraw only when the whole percent changes
+				return
 			}
 			lastPct = pct
 			fmt.Fprintf(r.io.Err, "\r  %s / %s  %3d%%   ", humanBytes(done), humanBytes(total), pct)
 			return
 		}
-		if done-lastBytes < 256<<10 {
-			return // unknown total: redraw every ~256 KiB
+		if done-lastBytes < bytesPerRedrawWithoutTotal {
+			return
 		}
 		lastBytes = done
 		fmt.Fprintf(r.io.Err, "\r  %s downloaded   ", humanBytes(done))

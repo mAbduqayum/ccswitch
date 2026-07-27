@@ -18,6 +18,9 @@ import (
 // version is injected at release time via -ldflags "-X main.version=...".
 var version = ""
 
+// shortRevLen is how much of a VCS revision an unversioned build reports.
+const shortRevLen = 12
+
 func main() {
 	env, err := claude.RealEnv()
 	if err != nil {
@@ -63,8 +66,8 @@ func versionString() string {
 		for _, s := range info.Settings {
 			if s.Key == "vcs.revision" {
 				rev := s.Value
-				if len(rev) > 12 {
-					rev = rev[:12]
+				if len(rev) > shortRevLen {
+					rev = rev[:shortRevLen]
 				}
 				return rev
 			}
