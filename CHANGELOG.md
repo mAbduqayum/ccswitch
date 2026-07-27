@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.1](https://github.com/mAbduqayum/ccswitch/compare/v0.4.0...v0.4.1) (2026-07-27)
+
+
+### Features
+
+* report credential refreshes done during discovery ([dd1fa6c](https://github.com/mAbduqayum/ccswitch/commit/dd1fa6cfbdf02c9548338caca74c5dd135507f77))
+
+
+### Refactoring
+
+* ref:  ([5f04902](https://github.com/mAbduqayum/ccswitch/commit/5f04902a59a6abade50c61bcb48b44c45ac23b5b))
+* ref:  ([ca8d26b](https://github.com/mAbduqayum/ccswitch/commit/ca8d26bad3c1f96ab09e34125f6b4e56254d4042))
+
 ## [0.4.0](https://github.com/mAbduqayum/ccswitch/compare/v0.3.0...v0.4.0) (2026-07-23)
 
 
